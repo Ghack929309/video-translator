@@ -22,8 +22,11 @@ export const ytdlp = {
     return new Promise((resolve, reject) => {
       const proc = spawn("yt-dlp", [
         "--no-playlist",
+        "--no-warnings",
+        "--extractor-args",
+        "youtube:player_client=default,mediaconnect",
         "--format",
-        "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "bv*[ext=mp4][height<=1080]+ba[ext=m4a]/bv*+ba/b",
         "--merge-output-format",
         "mp4",
         "--output",

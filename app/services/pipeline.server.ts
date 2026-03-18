@@ -484,8 +484,12 @@ export const pipeline = {
     ws.end();
     await new Promise<void>((resolve) => ws.on("finish", resolve));
 
+    // Trim to 30s and compress to MP3 to stay under Fish Audio's upload limit
+    const trimmedPath = path.join(tmpDir, "voice-sample-trimmed.mp3");
+    await ffmpeg.trimAndCompress(audioPath, trimmedPath, 30);
+
     const voiceId = await fishAudio.createVoiceModel(
-      audioPath,
+      trimmedPath,
       `dubly-${translationId}`,
     );
 
@@ -681,6 +685,24 @@ export const pipeline = {
     }
     aws.end();
     await new Promise<void>((resolve) => aws.on("finish", resolve));
+
+    // Verify files are valid before merging
+    const videoSize = fs.statSync(videoPath).size;
+    const audioSize = fs.statSync(audioPath).size;
+    console.log(
+      `[pipeline] Merge inputs — video: ${(videoSize / 1024 / 1024).toFixed(1)}MB, audio: ${(audioSize / 1024).toFixed(1)}KB`,
+    );
+
+    if (audioSize < 100) {
+      throw new Error(
+        `Synthesized audio file is too small (${audioSize} bytes) — likely empty`,
+      );
+    }
+
+    const audioDuration = await ffmpeg.getDuration(audioPath);
+    console.log(
+      `[pipeline] Synthesized audio duration: ${audioDuration.toFixed(1)}s`,
+    );
 
     // Merge
     const outputPath = await ffmpeg.mergeAudioVideo(

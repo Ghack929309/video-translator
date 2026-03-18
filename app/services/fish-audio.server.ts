@@ -24,8 +24,11 @@ export const fishAudio = {
 
     const form = new FormData();
     const audioBuffer = fs.readFileSync(audioPath);
-    const audioBlob = new Blob([audioBuffer], { type: "audio/wav" });
-    form.append("voices", audioBlob, "reference.wav");
+    const isMP3 = audioPath.endsWith(".mp3");
+    const audioBlob = new Blob([audioBuffer], {
+      type: isMP3 ? "audio/mpeg" : "audio/wav",
+    });
+    form.append("voices", audioBlob, isMP3 ? "reference.mp3" : "reference.wav");
     form.append("title", title);
     form.append("type", "tts");
     form.append("train_mode", "fast");
