@@ -13,10 +13,17 @@ export async function requireAuth(request: Request, headers: Headers) {
     throw redirect("/login", { headers });
   }
 
-  const profile = await db.profile.findUnique({ where: { id: user.id } });
-  if (!profile) {
-    throw redirect("/login", { headers });
-  }
+  // Auto-create profile if authenticated user doesn't have one yet
+  const profile = await db.profile.upsert({
+    where: { id: user.id },
+    update: {},
+    create: {
+      id: user.id,
+      email: user.email!,
+      name: user.user_metadata?.full_name ?? null,
+      avatarUrl: user.user_metadata?.avatar_url ?? null,
+    },
+  });
 
   return { user, profile, supabase };
 }

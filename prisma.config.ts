@@ -7,8 +7,8 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    // DATABASE_URL points to the pooler (port 6543) for the web server at runtime.
-    // For migrations, run: DATABASE_URL=$DIRECT_DATABASE_URL npx prisma migrate dev
-    url: env("DATABASE_URL"),
+    // Use DIRECT_DATABASE_URL (session-mode pooler, port 5432) for migrations.
+    // DATABASE_URL (transaction-mode pooler, port 6543) is used at runtime via PrismaPg adapter.
+    url: env("DIRECT_DATABASE_URL"),
   },
 });
