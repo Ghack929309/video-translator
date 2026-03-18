@@ -16,7 +16,10 @@ export const ffmpeg = {
    * Extract audio from a video file as WAV.
    * Returns the path to the extracted WAV file.
    */
-  async extractAudio(videoPath: string, translationId: string): Promise<string> {
+  async extractAudio(
+    videoPath: string,
+    translationId: string,
+  ): Promise<string> {
     const outputDir = path.join(os.tmpdir(), "dubly", translationId);
     fs.mkdirSync(outputDir, { recursive: true });
     const outputPath = path.join(outputDir, "source-audio.wav");
@@ -28,7 +31,9 @@ export const ffmpeg = {
         .audioFrequency(16000)
         .format("wav")
         .on("start", (cmd) => console.log(`[ffmpeg] ${cmd}`))
-        .on("error", (err) => reject(new Error(`FFmpeg extract audio failed: ${err.message}`)))
+        .on("error", (err) =>
+          reject(new Error(`FFmpeg extract audio failed: ${err.message}`)),
+        )
         .on("end", () => resolve(outputPath))
         .save(outputPath);
     });
@@ -61,7 +66,9 @@ export const ffmpeg = {
           "-shortest",
         ])
         .on("start", (cmd) => console.log(`[ffmpeg] ${cmd}`))
-        .on("error", (err) => reject(new Error(`FFmpeg merge failed: ${err.message}`)))
+        .on("error", (err) =>
+          reject(new Error(`FFmpeg merge failed: ${err.message}`)),
+        )
         .on("end", () => resolve(outputPath))
         .save(outputPath);
     });
@@ -101,7 +108,9 @@ export const ffmpeg = {
       Ffmpeg(audioPath)
         .audioFilters(filters)
         .on("start", (cmd) => console.log(`[ffmpeg] ${cmd}`))
-        .on("error", (err) => reject(new Error(`FFmpeg time-stretch failed: ${err.message}`)))
+        .on("error", (err) =>
+          reject(new Error(`FFmpeg time-stretch failed: ${err.message}`)),
+        )
         .on("end", () => resolve(outputPath))
         .save(outputPath);
     });
@@ -119,6 +128,69 @@ export const ffmpeg = {
         }
         resolve(metadata.format.duration ?? 0);
       });
+    });
+  },
+
+  /**
+   * Generate a silent audio file of the given duration in seconds.
+   */
+  async generateSilence(
+    durationSec: number,
+    outputPath: string,
+    sampleRate = 24000,
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      Ffmpeg()
+        .input("anullsrc=r=" + sampleRate + ":cl=mono")
+        .inputFormat("lavfi")
+        .duration(durationSec)
+        .audioChannels(1)
+        .audioFrequency(sampleRate)
+        .format("wav")
+        .on("error", (err) =>
+          reject(new Error(`FFmpeg silence failed: ${err.message}`)),
+        )
+        .on("end", () => resolve(outputPath))
+        .save(outputPath);
+    });
+  },
+
+  /**
+   * Concatenate multiple audio files sequentially using an FFmpeg concat list.
+   * Files should already be time-stretched and padded with silence segments.
+   */
+  async concatenateAudio(
+    audioPaths: string[],
+    outputPath: string,
+  ): Promise<string> {
+    if (audioPaths.length === 0)
+      throw new Error("No audio files to concatenate");
+    if (audioPaths.length === 1) {
+      fs.copyFileSync(audioPaths[0], outputPath);
+      return outputPath;
+    }
+
+    // Write a concat list file
+    const listPath = outputPath + ".list.txt";
+    const listContent = audioPaths.map((p) => `file '${p}'`).join("\n");
+    fs.writeFileSync(listPath, listContent);
+
+    return new Promise((resolve, reject) => {
+      Ffmpeg()
+        .input(listPath)
+        .inputOptions(["-f", "concat", "-safe", "0"])
+        .audioChannels(1)
+        .format("wav")
+        .on("start", (cmd) => console.log(`[ffmpeg] ${cmd}`))
+        .on("error", (err) => {
+          fs.unlinkSync(listPath);
+          reject(new Error(`FFmpeg concat failed: ${err.message}`));
+        })
+        .on("end", () => {
+          fs.unlinkSync(listPath);
+          resolve(outputPath);
+        })
+        .save(outputPath);
     });
   },
 

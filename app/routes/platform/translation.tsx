@@ -13,6 +13,7 @@ import { Badge } from "~/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { requireAuth } from "~/services/middleware/auth";
 import { db } from "~/services/db.server";
+import { tigris } from "~/services/tigris.server";
 import { usePolling } from "~/hooks/use-polling";
 import { TranslationProgress } from "~/components/translation-progress";
 import { languages } from "~/components/language-selector";
@@ -49,6 +50,15 @@ export async function loader({ request, params }: Route.LoaderArgs) {
         resultVideoKey: translation.resultVideoKey,
         transcriptJson: translation.transcriptJson as TranscriptJson | null,
         translatedJson: translation.translatedJson as TranslatedJson | null,
+        sourceVideoUrl: translation.video.storageKey
+          ? await tigris.presignedDownloadUrl(
+              translation.video.storageKey,
+              3600,
+            )
+          : null,
+        resultVideoUrl: translation.resultVideoKey
+          ? await tigris.presignedDownloadUrl(translation.resultVideoKey, 3600)
+          : null,
         startedAt: translation.startedAt?.toISOString() ?? null,
         completedAt: translation.completedAt?.toISOString() ?? null,
         createdAt: translation.createdAt.toISOString(),
@@ -217,6 +227,48 @@ export default function TranslationDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Video comparison — shown when result is available */}
+      {status === "COMPLETED" && translation.resultVideoUrl && (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader className="pb-2">
+              <p className="text-sm font-medium text-muted-foreground">
+                Original
+              </p>
+            </CardHeader>
+            <CardContent>
+              {translation.sourceVideoUrl ? (
+                <video
+                  src={translation.sourceVideoUrl}
+                  controls
+                  className="aspect-video w-full rounded-md bg-black"
+                />
+              ) : (
+                <div className="flex aspect-video items-center justify-center rounded-md bg-black">
+                  <span className="text-sm text-muted-foreground">
+                    No source video
+                  </span>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <p className="text-sm font-medium text-muted-foreground">
+                Translated ({langLabel})
+              </p>
+            </CardHeader>
+            <CardContent>
+              <video
+                src={translation.resultVideoUrl}
+                controls
+                className="aspect-video w-full rounded-md bg-black"
+              />
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* Transcript — shown when available */}
       {(translation.transcriptJson || translation.translatedJson) && (
         <Card>
@@ -269,11 +321,18 @@ export default function TranslationDetailPage() {
       )}
 
       {/* Completed — download button */}
-      {status === "COMPLETED" && (
-        <Button size="lg" className="w-full gap-2">
-          <Download className="h-4 w-4" />
-          Download Translated Video
-        </Button>
+      {status === "COMPLETED" && translation.resultVideoUrl && (
+        <a
+          href={translation.resultVideoUrl}
+          download
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <Button size="lg" className="w-full gap-2">
+            <Download className="h-4 w-4" />
+            Download Translated Video
+          </Button>
+        </a>
       )}
 
       {/* Failed — retry / delete */}
