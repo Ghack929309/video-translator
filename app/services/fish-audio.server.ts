@@ -19,10 +19,7 @@ export const fishAudio = {
    * Create a voice model from a reference audio file.
    * Returns the model ID to use for subsequent TTS calls.
    */
-  async createVoiceModel(
-    audioPath: string,
-    title: string,
-  ): Promise<string> {
+  async createVoiceModel(audioPath: string, title: string): Promise<string> {
     console.log(`[fish-audio] Creating voice model "${title}"...`);
 
     const form = new FormData();
@@ -30,6 +27,8 @@ export const fishAudio = {
     const audioBlob = new Blob([audioBuffer], { type: "audio/wav" });
     form.append("voices", audioBlob, "reference.wav");
     form.append("title", title);
+    form.append("type", "tts");
+    form.append("train_mode", "fast");
     form.append("visibility", "private");
 
     const res = await fetch(`${BASE_URL}/model`, {
@@ -40,7 +39,9 @@ export const fishAudio = {
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`Fish Audio create model failed (${res.status}): ${text}`);
+      throw new Error(
+        `Fish Audio create model failed (${res.status}): ${text}`,
+      );
     }
 
     const data = await res.json();
@@ -58,10 +59,7 @@ export const fishAudio = {
    * Generate speech from text using a cloned voice model.
    * Returns the audio as a Buffer (WAV format).
    */
-  async synthesize(
-    text: string,
-    referenceId: string,
-  ): Promise<Buffer> {
+  async synthesize(text: string, referenceId: string): Promise<Buffer> {
     const res = await fetch(`${BASE_URL}/v1/tts`, {
       method: "POST",
       headers: headers("application/json"),
@@ -92,7 +90,9 @@ export const fishAudio = {
     });
 
     if (!res.ok) {
-      console.warn(`[fish-audio] Failed to delete model ${modelId}: ${res.status}`);
+      console.warn(
+        `[fish-audio] Failed to delete model ${modelId}: ${res.status}`,
+      );
     } else {
       console.log(`[fish-audio] Deleted model ${modelId}`);
     }

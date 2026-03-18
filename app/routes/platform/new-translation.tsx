@@ -47,6 +47,20 @@ export async function action({ request }: Route.ActionArgs) {
   const { sourceType, sourceUrl, storageKey, title, targetLanguage } =
     parsed.data;
 
+  // Rate limit: max 5 concurrent (PENDING or PROCESSING) jobs per user
+  const activeJobs = await db.translation.count({
+    where: {
+      video: { profileId: profile.id },
+      status: { in: ["PENDING", "PROCESSING"] },
+    },
+  });
+  if (activeJobs >= 5) {
+    return {
+      error:
+        "You have too many translations in progress (max 5). Please wait for some to finish.",
+    };
+  }
+
   // For URL-based sources, storageKey will be set during the DOWNLOAD pipeline step
   const video = await db.video.create({
     data: {

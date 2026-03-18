@@ -1,4 +1,11 @@
-import { Link, useLoaderData, data } from "react-router";
+import {
+  Link,
+  useLoaderData,
+  data,
+  Form,
+  redirect,
+  useNavigation,
+} from "react-router";
 import {
   ArrowLeft,
   Check,
@@ -11,9 +18,11 @@ import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Badge } from "~/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
+import { Loader2 } from "lucide-react";
 import { requireAuth } from "~/services/middleware/auth";
 import { db } from "~/services/db.server";
 import { tigris } from "~/services/tigris.server";
+import { enqueueTranslation } from "~/services/worker.server";
 import { usePolling } from "~/hooks/use-polling";
 import { TranslationProgress } from "~/components/translation-progress";
 import { languages } from "~/components/language-selector";
@@ -21,6 +30,37 @@ import type { Route } from "./+types/translation";
 
 export function meta() {
   return [{ title: "Translation Detail — Dubly" }];
+}
+
+export async function action({ request, params }: Route.ActionArgs) {
+  const headers = new Headers();
+  const { profile } = await requireAuth(request, headers);
+  const formData = await request.formData();
+  const intent = formData.get("intent");
+
+  const translation = await db.translation.findUnique({
+    where: { id: params.id },
+    include: { video: true },
+  });
+
+  if (!translation || translation.video.profileId !== profile.id) {
+    throw new Response("Not found", { status: 404 });
+  }
+
+  if (intent === "retry") {
+    if (translation.status !== "FAILED") {
+      throw new Response("Can only retry failed translations", { status: 400 });
+    }
+    await enqueueTranslation(translation.id);
+    return data({ ok: true }, { headers });
+  }
+
+  if (intent === "delete") {
+    await db.translation.delete({ where: { id: translation.id } });
+    throw redirect("/platform/translations", { headers });
+  }
+
+  throw new Response("Unknown intent", { status: 400 });
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {
@@ -134,6 +174,11 @@ export default function TranslationDetailPage() {
   const langLabel = lang
     ? `${lang.flag} ${lang.name}`
     : translation.targetLanguage;
+
+  const navigation = useNavigation();
+  const isRetrying =
+    navigation.state === "submitting" &&
+    navigation.formData?.get("intent") === "retry";
 
   // Poll for live status updates while processing
   const isProcessing =
@@ -339,14 +384,37 @@ export default function TranslationDetailPage() {
       {status === "FAILED" && (
         <Card className="border-destructive/30">
           <CardContent className="flex gap-3 p-6">
-            <Button className="gap-2">
-              <RotateCcw className="h-4 w-4" />
-              Retry Translation
-            </Button>
-            <Button variant="ghost" className="gap-2 text-destructive">
-              <Trash2 className="h-4 w-4" />
-              Delete
-            </Button>
+            <Form method="post">
+              <input type="hidden" name="intent" value="retry" />
+              <Button type="submit" className="gap-2" disabled={isRetrying}>
+                {isRetrying ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RotateCcw className="h-4 w-4" />
+                )}
+                Retry Translation
+              </Button>
+            </Form>
+            <Form
+              method="post"
+              onSubmit={(e) => {
+                if (
+                  !confirm("Delete this translation? This cannot be undone.")
+                ) {
+                  e.preventDefault();
+                }
+              }}
+            >
+              <input type="hidden" name="intent" value="delete" />
+              <Button
+                type="submit"
+                variant="ghost"
+                className="gap-2 text-destructive"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </Button>
+            </Form>
           </CardContent>
         </Card>
       )}

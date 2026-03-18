@@ -46,6 +46,7 @@ export const assemblyai = {
 
     const transcript = await client.transcripts.transcribe({
       audio: audioUrl,
+      speech_models: ["universal-3-pro", "universal-2"],
       language_detection: true,
     });
 

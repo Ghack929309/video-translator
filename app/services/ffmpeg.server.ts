@@ -63,6 +63,10 @@ export const ffmpeg = {
           "1:a:0",
           "-c:v",
           "copy",
+          "-c:a",
+          "aac",
+          "-b:a",
+          "192k",
           "-shortest",
         ])
         .on("start", (cmd) => console.log(`[ffmpeg] ${cmd}`))

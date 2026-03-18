@@ -28,6 +28,19 @@ const STEP_PROGRESS: Record<PipelineStep, number> = {
   MERGE: 95,
 };
 
+const MAX_STEP_RETRIES = 3;
+const JOB_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
+const ORDERED_STEPS: PipelineStep[] = [
+  "DOWNLOAD",
+  "EXTRACT_AUDIO",
+  "TRANSCRIBE",
+  "TRANSLATE",
+  "CLONE_VOICE",
+  "SYNTHESIZE",
+  "MERGE",
+];
+
 /**
  * Update translation status in DB.
  */
@@ -42,10 +55,32 @@ async function updateTranslation(
 }
 
 /**
+ * Retry a step function with exponential backoff.
+ */
+async function withRetry(
+  stepName: string,
+  fn: () => Promise<void>,
+  maxRetries = MAX_STEP_RETRIES,
+): Promise<void> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await fn();
+      return;
+    } catch (err) {
+      if (attempt === maxRetries) throw err;
+      const delay = Math.min(1000 * Math.pow(2, attempt - 1), 15000);
+      console.warn(
+        `[pipeline] Step ${stepName} failed (attempt ${attempt}/${maxRetries}), retrying in ${delay}ms...`,
+      );
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+}
+
+/**
  * Pipeline orchestrator — runs translation steps sequentially.
- * Each step is idempotent: it checks for existing output before executing.
- * Phase 4 implements DOWNLOAD and EXTRACT_AUDIO only.
- * Remaining steps (TRANSCRIBE → MERGE) are stubs for Phase 5+.
+ * Each step is idempotent and wrapped in retry logic with exponential backoff.
+ * Supports resuming from the last failed step on retry.
  */
 export const pipeline = {
   async run(translationId: string) {
@@ -54,34 +89,56 @@ export const pipeline = {
       include: { video: true },
     });
 
+    const jobStart = Date.now();
+
+    // Determine resume point: if retrying a failed job, skip already-completed steps
+    let startIndex = 0;
+    if (translation.status === "FAILED" && translation.errorStep) {
+      const failedIdx = ORDERED_STEPS.indexOf(
+        translation.errorStep as PipelineStep,
+      );
+      if (failedIdx > 0) {
+        startIndex = failedIdx;
+        console.log(
+          `[pipeline] Resuming translation ${translationId} from step ${ORDERED_STEPS[startIndex]}`,
+        );
+      }
+    }
+
     await updateTranslation(translationId, {
       status: "PROCESSING",
-      startedAt: new Date(),
+      startedAt: translation.startedAt ?? new Date(),
       errorMessage: null,
       errorStep: null,
+      retryCount: { increment: translation.status === "FAILED" ? 1 : 0 },
     });
 
     try {
-      // Step 1 — DOWNLOAD
-      await this.stepDownload(translationId, translation.video);
+      const stepFns: Array<{ name: PipelineStep; fn: () => Promise<void> }> = [
+        {
+          name: "DOWNLOAD",
+          fn: () => this.stepDownload(translationId, translation.video),
+        },
+        {
+          name: "EXTRACT_AUDIO",
+          fn: () => this.stepExtractAudio(translationId),
+        },
+        { name: "TRANSCRIBE", fn: () => this.stepTranscribe(translationId) },
+        { name: "TRANSLATE", fn: () => this.stepTranslate(translationId) },
+        { name: "CLONE_VOICE", fn: () => this.stepCloneVoice(translationId) },
+        { name: "SYNTHESIZE", fn: () => this.stepSynthesize(translationId) },
+        { name: "MERGE", fn: () => this.stepMerge(translationId) },
+      ];
 
-      // Step 2 — EXTRACT_AUDIO
-      await this.stepExtractAudio(translationId);
-
-      // Step 3 — TRANSCRIBE
-      await this.stepTranscribe(translationId);
-
-      // Step 4 — TRANSLATE
-      await this.stepTranslate(translationId);
-
-      // Step 5 — CLONE_VOICE
-      await this.stepCloneVoice(translationId);
-
-      // Step 6 — SYNTHESIZE
-      await this.stepSynthesize(translationId);
-
-      // Step 7 — MERGE
-      await this.stepMerge(translationId);
+      for (let i = startIndex; i < stepFns.length; i++) {
+        // Check job timeout
+        if (Date.now() - jobStart > JOB_TIMEOUT_MS) {
+          throw new Error(
+            `Job timed out after 30 minutes (stuck at ${stepFns[i].name})`,
+          );
+        }
+        await withRetry(stepFns[i].name, stepFns[i].fn);
+      }
 
       await updateTranslation(translationId, {
         status: "COMPLETED",

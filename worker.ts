@@ -49,7 +49,10 @@ async function main() {
         await pipeline.run(payload.translationId);
 
         // Archive the message on success (moves to archive table)
-        await client.query("SELECT pgmq.archive($1, $2)", [QUEUE_NAME, msgId]);
+        await client.query("SELECT pgmq.archive($1, $2::bigint)", [
+          QUEUE_NAME,
+          msgId,
+        ]);
         console.log(`[worker] Archived msg ${msgId}`);
       } catch (err) {
         console.error(`[worker] Pipeline failed for msg ${msgId}:`, err);
