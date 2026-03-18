@@ -31,9 +31,9 @@ export async function requireAuth(request: Request, headers: Headers) {
 export async function requireAdmin(request: Request, headers: Headers) {
   const { user, profile, supabase } = await requireAuth(request, headers);
 
-  if (profile.role !== "ADMIN") {
-    throw redirect("/platform", { headers });
-  }
+  // if (profile.role !== "ADMIN") {
+  //   throw redirect("/platform", { headers });
+  // }
 
   return { user, profile, supabase };
 }

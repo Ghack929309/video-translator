@@ -1,50 +1,88 @@
-import { Link } from "react-router";
-import { Upload, Link as LinkIcon, ChevronRight, Check } from "lucide-react";
+import {
+  Form,
+  Link,
+  redirect,
+  useActionData,
+  useNavigation,
+} from "react-router";
+import { Upload, Link as LinkIcon, ChevronRight, Loader2 } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
+import { Card, CardContent } from "~/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "~/components/ui/popover";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "~/components/ui/command";
 import { Separator } from "~/components/ui/separator";
 import { useState } from "react";
+import { UploadZone } from "~/components/upload-zone";
+import { UrlInput } from "~/components/url-input";
+import { LanguageSelector } from "~/components/language-selector";
+import { useUpload } from "~/hooks/use-upload";
+import { requireAuth } from "~/services/middleware/auth";
+import { db } from "~/services/db.server";
+import { videoSubmitSchema } from "~/utils/validation";
+import type { Route } from "./+types/new-translation";
 
 export function meta() {
   return [{ title: "New Translation — Dubly" }];
 }
 
-const popularLanguages = [
-  { code: "en", flag: "\u{1F1FA}\u{1F1F8}", name: "English" },
-  { code: "es", flag: "\u{1F1EA}\u{1F1F8}", name: "Spanish" },
-  { code: "fr", flag: "\u{1F1EB}\u{1F1F7}", name: "French" },
-  { code: "de", flag: "\u{1F1E9}\u{1F1EA}", name: "German" },
-  { code: "pt", flag: "\u{1F1E7}\u{1F1F7}", name: "Portuguese" },
-  { code: "zh", flag: "\u{1F1E8}\u{1F1F3}", name: "Chinese" },
-  { code: "ja", flag: "\u{1F1EF}\u{1F1F5}", name: "Japanese" },
-  { code: "ko", flag: "\u{1F1F0}\u{1F1F7}", name: "Korean" },
-  { code: "ar", flag: "\u{1F1F8}\u{1F1E6}", name: "Arabic" },
-  { code: "hi", flag: "\u{1F1EE}\u{1F1F3}", name: "Hindi" },
-  { code: "it", flag: "\u{1F1EE}\u{1F1F9}", name: "Italian" },
-  { code: "ru", flag: "\u{1F1F7}\u{1F1FA}", name: "Russian" },
-];
+export async function action({ request }: Route.ActionArgs) {
+  const headers = new Headers();
+  const { profile } = await requireAuth(request, headers);
+  const formData = await request.formData();
+  const raw = Object.fromEntries(formData);
+  const parsed = videoSubmitSchema.safeParse(raw);
+
+  if (!parsed.success) {
+    const fieldErrors = parsed.error.flatten().fieldErrors;
+    const firstError =
+      fieldErrors.title?.[0] ??
+      fieldErrors.targetLanguage?.[0] ??
+      fieldErrors.sourceType?.[0] ??
+      "Invalid input";
+    return { error: firstError };
+  }
+
+  const { sourceType, sourceUrl, storageKey, title, targetLanguage } =
+    parsed.data;
+
+  // For URL-based sources, storageKey will be set during the DOWNLOAD pipeline step
+  const video = await db.video.create({
+    data: {
+      profileId: profile.id,
+      title,
+      sourceType,
+      sourceUrl: sourceUrl ?? null,
+      storageKey: storageKey ?? "",
+    },
+  });
+
+  const translation = await db.translation.create({
+    data: {
+      videoId: video.id,
+      targetLanguage,
+    },
+  });
+
+  throw redirect(`/platform/translations/${translation.id}`, { headers });
+}
 
 export default function NewTranslationPage() {
-  const [selectedLang, setSelectedLang] = useState<string | null>("fr");
-  const [langOpen, setLangOpen] = useState(false);
+  const actionData = useActionData<typeof action>();
+  const navigation = useNavigation();
+  const isSubmitting = navigation.state === "submitting";
 
-  const selected = popularLanguages.find((l) => l.code === selectedLang);
+  const [tab, setTab] = useState<string>("upload");
+  const [selectedLang, setSelectedLang] = useState<string | null>(null);
+  const [videoUrl, setVideoUrl] = useState("");
+  const [detectedPlatform, setDetectedPlatform] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+
+  const upload = useUpload();
+
+  const canSubmitUpload = upload.status === "done" && selectedLang;
+  const canSubmitUrl = videoUrl.trim() && detectedPlatform && selectedLang;
+  const canSubmit = tab === "upload" ? canSubmitUpload : canSubmitUrl;
 
   return (
     <div className="space-y-6">
@@ -55,10 +93,15 @@ export default function NewTranslationPage() {
         </p>
       </div>
 
+      {actionData?.error && (
+        <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {actionData.error}
+        </div>
+      )}
+
       <Card>
         <CardContent className="space-y-6 p-6">
-          {/* Source input */}
-          <Tabs defaultValue="upload">
+          <Tabs value={tab} onValueChange={setTab}>
             <TabsList>
               <TabsTrigger value="upload" className="gap-2">
                 <Upload className="h-4 w-4" />
@@ -71,100 +114,98 @@ export default function NewTranslationPage() {
             </TabsList>
 
             <TabsContent value="upload" className="mt-4">
-              <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-muted-foreground/25 p-12 text-center transition-colors hover:border-primary/50 hover:bg-primary/5">
-                <Upload className="h-10 w-10 text-muted-foreground" />
-                <p className="mt-4 text-sm font-medium">
-                  Drag and drop your video here
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  or click to browse
-                </p>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  MP4, MOV, AVI, WebM — up to 500MB
-                </p>
-              </div>
+              <UploadZone
+                status={upload.status}
+                progress={upload.progress}
+                fileName={upload.fileName}
+                fileSize={upload.fileSize}
+                error={upload.error}
+                onFileSelect={upload.upload}
+                onReset={upload.reset}
+              />
             </TabsContent>
 
-            <TabsContent value="link" className="mt-4 space-y-2">
-              <Label htmlFor="videoUrl">Video URL</Label>
-              <Input
-                id="videoUrl"
-                placeholder="https://youtube.com/watch?v=..."
+            <TabsContent value="link" className="mt-4">
+              <UrlInput
+                value={videoUrl}
+                onChange={(url, platform) => {
+                  setVideoUrl(url);
+                  setDetectedPlatform(platform);
+                }}
               />
-              <p className="text-xs text-muted-foreground">
-                Supports YouTube, Instagram, Facebook, Vimeo
-              </p>
             </TabsContent>
           </Tabs>
 
           <Separator />
 
-          {/* Language selector */}
           <div className="space-y-2">
             <Label>Target Language</Label>
-            <Popover open={langOpen} onOpenChange={setLangOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  role="combobox"
-                  className="w-full justify-between"
-                >
-                  {selected
-                    ? `${selected.flag} ${selected.name}`
-                    : "Search languages..."}
-                  <ChevronRight className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
-                <Command>
-                  <CommandInput placeholder="Search languages..." />
-                  <CommandList>
-                    <CommandEmpty>No language found.</CommandEmpty>
-                    <CommandGroup heading="Popular">
-                      {popularLanguages.map((lang) => (
-                        <CommandItem
-                          key={lang.code}
-                          value={lang.name}
-                          onSelect={() => {
-                            setSelectedLang(lang.code);
-                            setLangOpen(false);
-                          }}
-                        >
-                          <span className="mr-2">{lang.flag}</span>
-                          {lang.name}
-                          {selectedLang === lang.code && (
-                            <Check className="ml-auto h-4 w-4" />
-                          )}
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
+            <LanguageSelector value={selectedLang} onChange={setSelectedLang} />
           </div>
 
-          {/* Title */}
           <div className="space-y-2">
-            <Label htmlFor="title">
-              Video Title{" "}
-              <span className="text-muted-foreground">(optional)</span>
-            </Label>
-            <Input id="title" placeholder="My Product Demo" />
+            <Label htmlFor="title">Video Title</Label>
+            <Input
+              id="title"
+              name="title"
+              placeholder="My Product Demo"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
           </div>
 
-          {/* Actions */}
-          <div className="flex justify-end gap-3">
-            <Link to="/platform">
-              <Button variant="ghost">Cancel</Button>
-            </Link>
-            <Link to="/platform/translations/tr_002">
-              <Button className="gap-2">
+          <Form method="post">
+            {/* Hidden fields for form submission */}
+            <input
+              type="hidden"
+              name="title"
+              value={title || (upload.fileName ?? "Untitled Video")}
+            />
+            <input
+              type="hidden"
+              name="targetLanguage"
+              value={selectedLang ?? ""}
+            />
+            {tab === "upload" ? (
+              <>
+                <input type="hidden" name="sourceType" value="UPLOAD" />
+                <input
+                  type="hidden"
+                  name="storageKey"
+                  value={upload.storageKey ?? ""}
+                />
+              </>
+            ) : (
+              <>
+                <input
+                  type="hidden"
+                  name="sourceType"
+                  value={detectedPlatform ?? ""}
+                />
+                <input type="hidden" name="sourceUrl" value={videoUrl} />
+              </>
+            )}
+
+            <div className="flex justify-end gap-3">
+              <Link to="/platform">
+                <Button type="button" variant="ghost">
+                  Cancel
+                </Button>
+              </Link>
+              <Button
+                type="submit"
+                disabled={!canSubmit || isSubmitting}
+                className="gap-2"
+              >
+                {isSubmitting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
                 Start Translation
-                <ChevronRight className="h-4 w-4" />
               </Button>
-            </Link>
-          </div>
+            </div>
+          </Form>
         </CardContent>
       </Card>
     </div>

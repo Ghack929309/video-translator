@@ -35,6 +35,9 @@ export default [
     route("platform/billing", "routes/platform/billing.tsx"),
   ]),
 
+  // API routes (no UI)
+  route("api/upload", "routes/api/upload.ts"),
+
   // Admin — authenticated + admin role
   layout("routes/admin/layout.tsx", [
     route("admin", "routes/admin/dashboard.tsx"),
