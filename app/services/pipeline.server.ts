@@ -5,6 +5,8 @@ import { db } from "~/services/db.server";
 import { tigris } from "~/services/tigris.server";
 import { ytdlp } from "~/services/ytdlp.server";
 import { ffmpeg } from "~/services/ffmpeg.server";
+import { assemblyai } from "~/services/assemblyai.server";
+import { openaiService } from "~/services/openai.server";
 
 type PipelineStep =
   | "DOWNLOAD"
@@ -65,21 +67,27 @@ export const pipeline = {
       // Step 2 — EXTRACT_AUDIO
       await this.stepExtractAudio(translationId);
 
-      // Steps 3–7 are stubs for future phases
-      // Step 3 — TRANSCRIBE (Phase 5)
-      // Step 4 — TRANSLATE (Phase 5)
-      // Step 5 — CLONE_VOICE (Phase 6)
-      // Step 6 — SYNTHESIZE (Phase 6)
-      // Step 7 — MERGE (Phase 6)
+      // Step 3 — TRANSCRIBE
+      await this.stepTranscribe(translationId);
 
-      // For now, mark as completed after EXTRACT_AUDIO
+      // Step 4 — TRANSLATE
+      await this.stepTranslate(translationId);
+
+      // Steps 5–7 are stubs for Phase 6
+      // Step 5 — CLONE_VOICE
+      // Step 6 — SYNTHESIZE
+      // Step 7 — MERGE
+
+      // For now, mark as completed after TRANSLATE
       await updateTranslation(translationId, {
         status: "COMPLETED",
         progress: 100,
         completedAt: new Date(),
       });
 
-      console.log(`[pipeline] Translation ${translationId} completed (Phase 4: download + extract)`);
+      console.log(
+        `[pipeline] Translation ${translationId} completed (Phase 5: transcribe + translate)`,
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       console.error(`[pipeline] Translation ${translationId} failed:`, message);
@@ -106,7 +114,12 @@ export const pipeline = {
    */
   async stepDownload(
     translationId: string,
-    video: { id: string; sourceType: string; sourceUrl: string | null; storageKey: string },
+    video: {
+      id: string;
+      sourceType: string;
+      sourceUrl: string | null;
+      storageKey: string;
+    },
   ) {
     // Skip if storageKey already exists (user uploaded directly)
     if (video.storageKey && video.sourceType === "UPLOAD") {
@@ -127,8 +140,13 @@ export const pipeline = {
       throw new Error("No source URL provided for download");
     }
 
-    console.log(`[pipeline] Step DOWNLOAD — downloading from ${video.sourceUrl}`);
-    const { filePath, mimeType } = await ytdlp.download(video.sourceUrl, video.id);
+    console.log(
+      `[pipeline] Step DOWNLOAD — downloading from ${video.sourceUrl}`,
+    );
+    const { filePath, mimeType } = await ytdlp.download(
+      video.sourceUrl,
+      video.id,
+    );
 
     // Upload downloaded file to Tigris
     const storageKey = `videos/${video.id}/source.mp4`;
@@ -167,7 +185,9 @@ export const pipeline = {
 
     // Skip if already extracted
     if (translation.extractedAudioKey) {
-      console.log(`[pipeline] Step EXTRACT_AUDIO skipped — audio already extracted`);
+      console.log(
+        `[pipeline] Step EXTRACT_AUDIO skipped — audio already extracted`,
+      );
       await updateTranslation(translationId, {
         currentStep: "EXTRACT_AUDIO",
         progress: STEP_PROGRESS.EXTRACT_AUDIO,
@@ -180,7 +200,9 @@ export const pipeline = {
       progress: 15,
     });
 
-    console.log(`[pipeline] Step EXTRACT_AUDIO — extracting from ${translation.video.storageKey}`);
+    console.log(
+      `[pipeline] Step EXTRACT_AUDIO — extracting from ${translation.video.storageKey}`,
+    );
 
     // Download source video from Tigris to /tmp
     const tmpDir = path.join(os.tmpdir(), "dubly", translationId);
@@ -225,6 +247,130 @@ export const pipeline = {
       });
     }
 
-    console.log(`[pipeline] Step EXTRACT_AUDIO complete — stored at ${audioKey}`);
+    console.log(
+      `[pipeline] Step EXTRACT_AUDIO complete — stored at ${audioKey}`,
+    );
+  },
+
+  /**
+   * Step 3 — TRANSCRIBE
+   * Get a presigned URL for the extracted audio, send to AssemblyAI,
+   * store the transcript JSON on the translation record.
+   */
+  async stepTranscribe(translationId: string) {
+    const translation = await db.translation.findUniqueOrThrow({
+      where: { id: translationId },
+    });
+
+    // Skip if already transcribed
+    if (translation.transcriptJson) {
+      console.log(
+        `[pipeline] Step TRANSCRIBE skipped — transcript already exists`,
+      );
+      await updateTranslation(translationId, {
+        currentStep: "TRANSCRIBE",
+        progress: STEP_PROGRESS.TRANSCRIBE,
+      });
+      return;
+    }
+
+    if (!translation.extractedAudioKey) {
+      throw new Error(
+        "No extracted audio key — EXTRACT_AUDIO step may have been skipped",
+      );
+    }
+
+    await updateTranslation(translationId, {
+      currentStep: "TRANSCRIBE",
+      progress: 25,
+    });
+
+    console.log(`[pipeline] Step TRANSCRIBE — sending audio to AssemblyAI`);
+
+    // Generate a presigned download URL for AssemblyAI to fetch the audio
+    const audioUrl = await tigris.presignedDownloadUrl(
+      translation.extractedAudioKey,
+      3600,
+    );
+
+    const transcript = await assemblyai.transcribe(audioUrl);
+
+    await updateTranslation(translationId, {
+      transcriptJson: transcript as unknown as Record<string, unknown>,
+      progress: STEP_PROGRESS.TRANSCRIBE,
+    });
+
+    console.log(
+      `[pipeline] Step TRANSCRIBE complete — ${transcript.segments.length} segments, ` +
+        `${transcript.words.length} words`,
+    );
+  },
+
+  /**
+   * Step 4 — TRANSLATE
+   * Read the transcript from the DB, translate all segments via OpenAI,
+   * store the translated JSON on the translation record.
+   */
+  async stepTranslate(translationId: string) {
+    const translation = await db.translation.findUniqueOrThrow({
+      where: { id: translationId },
+    });
+
+    // Skip if already translated
+    if (translation.translatedJson) {
+      console.log(
+        `[pipeline] Step TRANSLATE skipped — translation already exists`,
+      );
+      await updateTranslation(translationId, {
+        currentStep: "TRANSLATE",
+        progress: STEP_PROGRESS.TRANSLATE,
+      });
+      return;
+    }
+
+    if (!translation.transcriptJson) {
+      throw new Error(
+        "No transcript JSON — TRANSCRIBE step may have been skipped",
+      );
+    }
+
+    await updateTranslation(translationId, {
+      currentStep: "TRANSLATE",
+      progress: 45,
+    });
+
+    console.log(
+      `[pipeline] Step TRANSLATE — translating to ${translation.targetLanguage}`,
+    );
+
+    const transcript = translation.transcriptJson as unknown as {
+      segments: {
+        text: string;
+        start: number;
+        end: number;
+        words: {
+          text: string;
+          start: number;
+          end: number;
+          confidence: number;
+        }[];
+      }[];
+      languageCode: string | null;
+    };
+
+    const translated = await openaiService.translateSegments(
+      transcript.segments,
+      translation.targetLanguage,
+      transcript.languageCode,
+    );
+
+    await updateTranslation(translationId, {
+      translatedJson: translated as unknown as Record<string, unknown>[],
+      progress: STEP_PROGRESS.TRANSLATE,
+    });
+
+    console.log(
+      `[pipeline] Step TRANSLATE complete — ${translated.length} segments translated`,
+    );
   },
 };

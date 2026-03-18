@@ -10,6 +10,7 @@ import {
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Badge } from "~/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { requireAuth } from "~/services/middleware/auth";
 import { db } from "~/services/db.server";
 import { usePolling } from "~/hooks/use-polling";
@@ -46,6 +47,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
         errorMessage: translation.errorMessage,
         errorStep: translation.errorStep,
         resultVideoKey: translation.resultVideoKey,
+        transcriptJson: translation.transcriptJson as TranscriptJson | null,
+        translatedJson: translation.translatedJson as TranslatedJson | null,
         startedAt: translation.startedAt?.toISOString() ?? null,
         completedAt: translation.completedAt?.toISOString() ?? null,
         createdAt: translation.createdAt.toISOString(),
@@ -53,6 +56,29 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     },
     { headers },
   );
+}
+
+interface TranscriptSegment {
+  text: string;
+  start: number;
+  end: number;
+}
+
+interface TranslatedSegment {
+  originalText: string;
+  translatedText: string;
+  start: number;
+  end: number;
+}
+
+type TranscriptJson = { segments: TranscriptSegment[] } | null;
+type TranslatedJson = TranslatedSegment[] | null;
+
+function formatTimestamp(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return `${min}:${sec.toString().padStart(2, "0")}`;
 }
 
 function timeAgo(dateStr: string): string {
@@ -190,6 +216,57 @@ export default function TranslationDetailPage() {
           </dl>
         </CardContent>
       </Card>
+
+      {/* Transcript — shown when available */}
+      {(translation.transcriptJson || translation.translatedJson) && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Transcript</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Tabs defaultValue="original">
+              <TabsList>
+                <TabsTrigger value="original">Original</TabsTrigger>
+                {translation.translatedJson && (
+                  <TabsTrigger value="translated">Translated</TabsTrigger>
+                )}
+              </TabsList>
+              <TabsContent value="original" className="mt-4 space-y-1">
+                {(translation.transcriptJson as TranscriptJson)?.segments.map(
+                  (seg, i) => (
+                    <div
+                      key={i}
+                      className="flex gap-4 rounded-md px-2 py-1 leading-relaxed hover:bg-muted/50"
+                    >
+                      <span className="w-12 shrink-0 font-mono text-xs text-muted-foreground">
+                        {formatTimestamp(seg.start)}
+                      </span>
+                      <span className="text-sm">{seg.text}</span>
+                    </div>
+                  ),
+                )}
+              </TabsContent>
+              {translation.translatedJson && (
+                <TabsContent value="translated" className="mt-4 space-y-1">
+                  {(translation.translatedJson as TranslatedJson)?.map(
+                    (seg, i) => (
+                      <div
+                        key={i}
+                        className="flex gap-4 rounded-md px-2 py-1 leading-relaxed hover:bg-muted/50"
+                      >
+                        <span className="w-12 shrink-0 font-mono text-xs text-muted-foreground">
+                          {formatTimestamp(seg.start)}
+                        </span>
+                        <span className="text-sm">{seg.translatedText}</span>
+                      </div>
+                    ),
+                  )}
+                </TabsContent>
+              )}
+            </Tabs>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Completed — download button */}
       {status === "COMPLETED" && (
