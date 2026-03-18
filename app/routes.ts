@@ -37,6 +37,7 @@ export default [
 
   // API routes (no UI)
   route("api/upload", "routes/api/upload.ts"),
+  route("api/jobs/:id/status", "routes/api/jobs-id-status.ts"),
 
   // Admin — authenticated + admin role
   layout("routes/admin/layout.tsx", [

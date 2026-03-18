@@ -20,6 +20,7 @@ import { useUpload } from "~/hooks/use-upload";
 import { requireAuth } from "~/services/middleware/auth";
 import { db } from "~/services/db.server";
 import { videoSubmitSchema } from "~/utils/validation";
+import { enqueueTranslation } from "~/services/worker.server";
 import type { Route } from "./+types/new-translation";
 
 export function meta() {
@@ -63,6 +64,9 @@ export async function action({ request }: Route.ActionArgs) {
       targetLanguage,
     },
   });
+
+  // Enqueue the translation processing job
+  await enqueueTranslation(translation.id);
 
   throw redirect(`/platform/translations/${translation.id}`, { headers });
 }
