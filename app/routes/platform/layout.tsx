@@ -1,4 +1,11 @@
-import { Link, Outlet, useLocation } from "react-router";
+import {
+  data,
+  Form,
+  Link,
+  Outlet,
+  useLoaderData,
+  useLocation,
+} from "react-router";
 import {
   Languages,
   LayoutDashboard,
@@ -20,8 +27,25 @@ import {
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTrigger } from "~/components/ui/sheet";
-import { MOCK_PROFILE } from "~/utils/mock-data";
+import { requireAuth } from "~/services/middleware/auth";
+import type { Route } from "./+types/layout";
 import { useState } from "react";
+
+export async function loader({ request }: Route.LoaderArgs) {
+  const headers = new Headers();
+  const { profile } = await requireAuth(request, headers);
+  return data(
+    {
+      profile: {
+        id: profile.id,
+        name: profile.name,
+        email: profile.email,
+        role: profile.role,
+      },
+    },
+    { headers },
+  );
+}
 
 const mainNav = [
   { label: "Dashboard", href: "/platform", icon: LayoutDashboard },
@@ -35,10 +59,12 @@ const secondaryNav = [
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const location = useLocation();
-  const initials = MOCK_PROFILE.name
+  const { profile } = useLoaderData<typeof loader>();
+  const initials = (profile.name ?? profile.email)
     .split(" ")
-    .map((n) => n[0])
-    .join("");
+    .map((n: string) => n[0])
+    .join("")
+    .toUpperCase();
 
   return (
     <div className="flex h-full flex-col">
@@ -104,16 +130,23 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             <AvatarFallback className="text-xs">{initials}</AvatarFallback>
           </Avatar>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium">{MOCK_PROFILE.name}</p>
+            <p className="truncate text-sm font-medium">
+              {profile.name ?? "User"}
+            </p>
             <p className="truncate text-xs text-muted-foreground">
-              {MOCK_PROFILE.email}
+              {profile.email}
             </p>
           </div>
         </div>
-        <button className="mt-3 flex w-full items-center gap-2 text-sm text-muted-foreground hover:text-destructive">
-          <LogOut className="h-4 w-4" />
-          Sign Out
-        </button>
+        <Form method="post" action="/logout">
+          <button
+            type="submit"
+            className="mt-3 flex w-full items-center gap-2 text-sm text-muted-foreground hover:text-destructive"
+          >
+            <LogOut className="h-4 w-4" />
+            Sign Out
+          </button>
+        </Form>
       </div>
     </div>
   );
@@ -134,9 +167,7 @@ function Breadcrumb() {
     <div className="flex items-center gap-1 text-sm">
       {segments.map((seg, i) => (
         <span key={seg} className="flex items-center gap-1">
-          {i > 0 && (
-            <ChevronRight className="h-3 w-3 text-muted-foreground" />
-          )}
+          {i > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground" />}
           <span
             className={
               i === segments.length - 1
@@ -154,10 +185,12 @@ function Breadcrumb() {
 
 export default function PlatformLayout() {
   const [sheetOpen, setSheetOpen] = useState(false);
-  const initials = MOCK_PROFILE.name
+  const { profile } = useLoaderData<typeof loader>();
+  const initials = (profile.name ?? profile.email)
     .split(" ")
-    .map((n) => n[0])
-    .join("");
+    .map((n: string) => n[0])
+    .join("")
+    .toUpperCase();
 
   return (
     <div className="min-h-screen">
@@ -188,7 +221,9 @@ export default function PlatformLayout() {
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="rounded-full">
                 <Avatar className="h-8 w-8">
-                  <AvatarFallback className="text-xs">{initials}</AvatarFallback>
+                  <AvatarFallback className="text-xs">
+                    {initials}
+                  </AvatarFallback>
                 </Avatar>
               </Button>
             </DropdownMenuTrigger>
@@ -199,8 +234,12 @@ export default function PlatformLayout() {
               <DropdownMenuItem asChild>
                 <Link to="/platform/billing">Billing</Link>
               </DropdownMenuItem>
-              <DropdownMenuItem className="text-destructive">
-                Sign Out
+              <DropdownMenuItem className="text-destructive" asChild>
+                <Form method="post" action="/logout">
+                  <button type="submit" className="w-full text-left">
+                    Sign Out
+                  </button>
+                </Form>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

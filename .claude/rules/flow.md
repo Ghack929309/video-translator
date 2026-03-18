@@ -375,13 +375,13 @@ export function createSupabaseClient(request: Request, headers: Headers) {
 }
 
 /**
- * Admin client — uses service_role key, bypasses RLS.
+ * Admin client — uses secret key, bypasses RLS.
  * Use ONLY in the worker process and admin routes.
  * Never expose to the client.
  */
 export const supabaseAdmin = createClient(
   env.SUPABASE_URL,
-  env.SUPABASE_SERVICE_ROLE_KEY,
+  env.SUPABASE_SECRET_KEY,
 );
 ```
 
@@ -645,7 +645,7 @@ Make it reliable and usable.
 # Supabase
 SUPABASE_URL="https://xxxxx.supabase.co"
 SUPABASE_PUBLISHABLE_KEY="sb_publishable_..."  # Safe for client — respects RLS
-SUPABASE_SERVICE_ROLE_KEY="eyJ..."             # Server-only — bypasses RLS
+SUPABASE_SECRET_KEY="sb_secret_..."             # Server-only — bypasses RLS
 
 # Database (both point to Supabase PostgreSQL)
 DATABASE_URL="postgresql://...@...pooler.supabase.com:6543/postgres?pgbouncer=true"     # Pooler for web

@@ -1,5 +1,21 @@
-import { Link, Outlet } from "react-router";
+import { Link, Outlet, redirect } from "react-router";
 import { Languages } from "lucide-react";
+import { createSupabaseClient } from "~/services/supabase.server";
+import type { Route } from "./+types/layout";
+
+export async function loader({ request }: Route.LoaderArgs) {
+  const headers = new Headers();
+  const supabase = createSupabaseClient(request, headers);
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (user) {
+    throw redirect("/platform", { headers });
+  }
+
+  return null;
+}
 
 export default function LoginLayout() {
   return (

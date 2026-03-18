@@ -1,117 +1,74 @@
-import { Link } from "react-router";
-import { Video, ChevronRight, Loader2 } from "lucide-react";
+import { Link, useRouteLoaderData } from "react-router";
+import { Video, ChevronRight, Plus } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
-import { Badge } from "~/components/ui/badge";
-import {
-  MOCK_TRANSLATIONS,
-  MOCK_PROFILE,
-  formatDuration,
-  timeAgo,
-} from "~/utils/mock-data";
 
 export function meta() {
   return [{ title: "Dashboard — Dubly" }];
 }
 
-function StatusBadge({ status }: { status: string }) {
-  switch (status) {
-    case "COMPLETED":
-      return (
-        <Badge className="border-green-500/20 bg-green-500/10 text-green-500">
-          Completed
-        </Badge>
-      );
-    case "PROCESSING":
-      return (
-        <Badge className="border-blue-500/20 bg-blue-500/10 text-blue-500">
-          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-          Processing
-        </Badge>
-      );
-    case "FAILED":
-      return (
-        <Badge className="border-destructive/20 bg-destructive/10 text-destructive">
-          Failed
-        </Badge>
-      );
-    default:
-      return (
-        <Badge variant="secondary">Pending</Badge>
-      );
-  }
-}
-
 export default function DashboardPage() {
-  const totalVideos = MOCK_TRANSLATIONS.length;
-  const completed = MOCK_TRANSLATIONS.filter((t) => t.status === "COMPLETED").length;
-  const inProgress = MOCK_TRANSLATIONS.filter((t) => t.status === "PROCESSING").length;
-  const recent = MOCK_TRANSLATIONS.slice(0, 5);
-
-  const stats = [
-    { label: "TOTAL VIDEOS", value: totalVideos, trend: "+3 this week" },
-    { label: "COMPLETED", value: completed, trend: "+3 this week" },
-    { label: "IN PROGRESS", value: inProgress, trend: "+3 this week" },
-  ];
+  const layoutData = useRouteLoaderData("routes/platform/layout") as
+    | {
+        profile: {
+          id: string;
+          name: string | null;
+          email: string;
+          role: string;
+        };
+      }
+    | undefined;
+  const name =
+    layoutData?.profile?.name ?? layoutData?.profile?.email ?? "there";
 
   return (
     <div className="space-y-8">
-      <h1 className="text-2xl font-semibold">
-        Welcome back, {MOCK_PROFILE.name.split(" ")[0]}
-      </h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">
+          Welcome back, {name.split(" ")[0]}
+        </h1>
+        <Link to="/platform/new">
+          <Button size="sm" className="gap-2">
+            <Plus className="h-4 w-4" />
+            New Translation
+          </Button>
+        </Link>
+      </div>
 
-      {/* Stats */}
+      {/* Stats — will be populated with real data in Phase 3+ */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {stats.map((stat) => (
+        {[
+          { label: "TOTAL VIDEOS", value: 0 },
+          { label: "COMPLETED", value: 0 },
+          { label: "IN PROGRESS", value: 0 },
+        ].map((stat) => (
           <Card key={stat.label} className="p-4">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">
               {stat.label}
             </p>
             <p className="mt-1 text-3xl font-bold">{stat.value}</p>
-            <p className="mt-1 text-xs text-green-500">{stat.trend}</p>
           </Card>
         ))}
       </div>
 
-      {/* Recent Translations */}
-      <div>
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-medium">Recent Translations</h2>
-          <Link
-            to="/platform/translations"
-            className="flex items-center gap-1 text-sm text-primary hover:underline"
-          >
-            View all <ChevronRight className="h-3 w-3" />
+      {/* Empty state */}
+      <Card>
+        <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+            <Video className="h-6 w-6 text-muted-foreground" />
+          </div>
+          <h3 className="mt-4 text-lg font-medium">No translations yet</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Upload a video or paste a URL to get started
+          </p>
+          <Link to="/platform/new" className="mt-4">
+            <Button size="sm" className="gap-2">
+              <Plus className="h-4 w-4" />
+              New Translation
+            </Button>
           </Link>
-        </div>
-
-        <Card>
-          <CardContent className="divide-y divide-border p-0">
-            {recent.map((t) => (
-              <Link
-                key={t.id}
-                to={`/platform/translations/${t.id}`}
-                className="flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted">
-                    <Video className="h-5 w-5 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="font-medium">{t.videoTitle}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {t.targetFlag} {t.targetLanguage} &middot;{" "}
-                      {formatDuration(t.durationSec)} &middot;{" "}
-                      {timeAgo(t.createdAt)}
-                    </p>
-                  </div>
-                </div>
-                <StatusBadge status={t.status} />
-              </Link>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
