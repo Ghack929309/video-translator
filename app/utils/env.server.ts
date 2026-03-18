@@ -3,7 +3,7 @@ import { z } from "zod";
 const envSchema = z.object({
   // Supabase
   SUPABASE_URL: z.string().url(),
-  SUPABASE_ANON_KEY: z.string().min(1),
+  SUPABASE_PUBLISHABLE_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
 
   // Database

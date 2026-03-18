@@ -187,7 +187,7 @@ A web application that allows users to upload videos or paste links (YouTube, In
 
 ### Types
 
-19. **Prisma-generated types are the source of truth for DB shapes.** Don't redefine them. Import from `@prisma/client`. Files in `app/types/` define derived types, DTOs, and non-DB types only (API responses, pipeline states, form shapes).
+19. **Prisma-generated types are the source of truth for DB shapes.** Don't redefine them. Import from `~/generated/prisma`. Files in `app/types/` define derived types, DTOs, and non-DB types only (API responses, pipeline states, form shapes).
 20. **Use discriminated unions for status fields.** For example: `type TranslationStatus = "pending" | "downloading" | "transcribing" | "translating" | "synthesizing" | "merging" | "completed" | "failed"`.
 
 ### Utils
@@ -361,7 +361,7 @@ import { env } from "~/utils/env.server";
  * Reads and writes session cookies from/to the request/response.
  */
 export function createSupabaseClient(request: Request, headers: Headers) {
-  return createServerClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
+  return createServerClient(env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY, {
     cookies: {
       getAll() {
         return parseCookieHeader(request.headers.get("Cookie") ?? "");
@@ -648,7 +648,7 @@ Make it reliable and usable.
 ```bash
 # Supabase
 SUPABASE_URL="https://xxxxx.supabase.co"
-SUPABASE_ANON_KEY="eyJ..."                    # Safe for client — respects RLS
+SUPABASE_PUBLISHABLE_KEY="sb_publishable_..."  # Safe for client — respects RLS
 SUPABASE_SERVICE_ROLE_KEY="eyJ..."             # Server-only — bypasses RLS
 
 # Database (both point to Supabase PostgreSQL)

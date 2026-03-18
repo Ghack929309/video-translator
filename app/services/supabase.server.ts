@@ -11,7 +11,7 @@ import { env } from "~/utils/env.server";
  * Reads and writes session cookies from/to the request/response.
  */
 export function createSupabaseClient(request: Request, headers: Headers) {
-  return createServerClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
+  return createServerClient(env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY, {
     cookies: {
       getAll() {
         return parseCookieHeader(request.headers.get("Cookie") ?? "").map(
