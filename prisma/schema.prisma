@@ -1,0 +1,86 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Profile {
+  id        String   @id
+  email     String   @unique
+  name      String?
+  role      Role     @default(USER)
+  avatarUrl String?
+  videos    Video[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Video {
+  id            String        @id @default(cuid())
+  profileId     String
+  profile       Profile       @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  title         String
+  sourceType    SourceType
+  sourceUrl     String?
+  storageKey    String
+  durationSec   Int?
+  mimeType      String?
+  fileSizeBytes Int?
+  translations  Translation[]
+  createdAt     DateTime      @default(now())
+}
+
+model Translation {
+  id                  String            @id @default(cuid())
+  videoId             String
+  video               Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  targetLanguage      String
+  status              TranslationStatus @default(PENDING)
+  currentStep         PipelineStep?
+  progress            Int               @default(0)
+  extractedAudioKey   String?
+  transcriptJson      Json?
+  translatedJson      Json?
+  synthesizedAudioKey String?
+  resultVideoKey      String?
+  fishAudioVoiceId    String?
+  errorMessage        String?
+  errorStep           PipelineStep?
+  retryCount          Int               @default(0)
+  startedAt           DateTime?
+  completedAt         DateTime?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum SourceType {
+  UPLOAD
+  YOUTUBE
+  INSTAGRAM
+  FACEBOOK
+  VIMEO
+}
+
+enum TranslationStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum PipelineStep {
+  DOWNLOAD
+  EXTRACT_AUDIO
+  TRANSCRIBE
+  TRANSLATE
+  CLONE_VOICE
+  SYNTHESIZE
+  MERGE
+}

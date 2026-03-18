@@ -1,0 +1,32 @@
+app = "video-translator"
+primary_region = "iad"
+
+[build]
+
+[processes]
+  web = "npm run start"
+  worker = "node build/worker/index.js"
+
+[[services]]
+  internal_port = 3000
+  processes = ["web"]
+  protocol = "tcp"
+
+  [[services.ports]]
+    handlers = ["http"]
+    port = 80
+    force_https = true
+
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port = 443
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 25
+    soft_limit = 20
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
