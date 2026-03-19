@@ -17,7 +17,15 @@ export function createPgClient() {
  */
 export async function ensureQueue(client: pg.Client) {
   await client.query("CREATE EXTENSION IF NOT EXISTS pgmq");
-  await client.query("SELECT pgmq.create($1)", [QUEUE_NAME]);
+  // Only create the queue if it doesn't already exist — pgmq.create() is not
+  // idempotent and throws if the queue's sequence is already part of the extension.
+  const { rows } = await client.query(
+    "SELECT 1 FROM pgmq.meta WHERE queue_name = $1",
+    [QUEUE_NAME],
+  );
+  if (rows.length === 0) {
+    await client.query("SELECT pgmq.create($1)", [QUEUE_NAME]);
+  }
 }
 
 /**

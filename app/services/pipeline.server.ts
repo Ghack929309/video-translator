@@ -578,6 +578,7 @@ export const pipeline = {
         const audioBuffer = await fishAudio.synthesize(
           seg.translatedText,
           translation.fishAudioVoiceId,
+          translation.targetLanguage,
         );
         fs.writeFileSync(rawPath, audioBuffer);
 

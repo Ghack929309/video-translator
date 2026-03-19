@@ -12,6 +12,34 @@ function headers(contentType?: string): Record<string, string> {
 }
 
 /**
+ * S2 Pro inline control hints for native pronunciation per target language.
+ * These instruct the model to speak with a native accent rather than
+ * carrying over the source speaker's accent.
+ */
+const LANGUAGE_HINTS: Record<string, string> = {
+  en: "[speak with a native American English accent, clear and natural]",
+  fr: "[parle avec un accent français natif, naturel et fluide]",
+  es: "[habla con un acento español nativo, claro y natural]",
+  de: "[sprich mit einem natürlichen deutschen Akzent, klar und deutlich]",
+  it: "[parla con un accento italiano nativo, naturale e fluido]",
+  pt: "[fale com um sotaque português nativo, claro e natural]",
+  ja: "[ネイティブな日本語のアクセントで、自然に話してください]",
+  ko: "[자연스러운 한국어 억양으로 말해주세요]",
+  zh: "[用标准普通话发音，自然流畅地说]",
+  ru: "[говори с естественным русским акцентом, чётко и плавно]",
+  ar: "[تحدث بلهجة عربية فصحى طبيعية وسلسة]",
+  hi: "[प्राकृतिक हिंदी उच्चारण के साथ स्पष्ट और स्वाभाविक बोलें]",
+  nl: "[spreek met een natuurlijk Nederlands accent, helder en vloeiend]",
+  pl: "[mów z naturalnym polskim akcentem, wyraźnie i płynnie]",
+  tr: "[doğal bir Türkçe aksanıyla, net ve akıcı konuş]",
+  vi: "[nói với giọng Việt Nam tự nhiên, rõ ràng và trôi chảy]",
+  th: "[พูดด้วยสำเนียงไทยที่เป็นธรรมชาติ ชัดเจนและลื่นไหล]",
+  id: "[berbicara dengan aksen Indonesia yang alami, jelas dan lancar]",
+  sv: "[tala med en naturlig svensk accent, tydligt och flytande]",
+  uk: "[говори з природним українським акцентом, чітко і плавно]",
+};
+
+/**
  * Fish Audio service — voice cloning and TTS via REST API.
  */
 export const fishAudio = {
@@ -60,14 +88,28 @@ export const fishAudio = {
 
   /**
    * Generate speech from text using a cloned voice model.
+   * Uses S2 Pro for better cross-lingual synthesis and reduced accent bleeding.
    * Returns the audio as a Buffer (WAV format).
    */
-  async synthesize(text: string, referenceId: string): Promise<Buffer> {
+  async synthesize(
+    text: string,
+    referenceId: string,
+    targetLanguage?: string,
+  ): Promise<Buffer> {
+    // Wrap text with a native-speaker language hint to reduce accent bleeding
+    const langHint = targetLanguage
+      ? (LANGUAGE_HINTS[targetLanguage] ?? "")
+      : "";
+    const instructedText = langHint ? `${langHint}\n${text}` : text;
+
     const res = await fetch(`${BASE_URL}/v1/tts`, {
       method: "POST",
-      headers: headers("application/json"),
+      headers: {
+        ...headers("application/json"),
+        model: "s2-pro",
+      },
       body: JSON.stringify({
-        text,
+        text: instructedText,
         reference_id: referenceId,
         format: "wav",
         latency: "normal",
