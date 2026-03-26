@@ -21,6 +21,7 @@ export interface TranscriptSegment {
   start: number; // ms
   end: number; // ms
   words: TranscriptWord[];
+  speaker?: string;
 }
 
 /**
@@ -48,6 +49,7 @@ export const assemblyai = {
       audio: audioUrl,
       speech_models: ["universal-3-pro", "universal-2"],
       language_detection: true,
+      speaker_labels: true,
     });
 
     if (transcript.status === "error") {
@@ -61,12 +63,35 @@ export const assemblyai = {
       confidence: w.confidence,
     }));
 
-    // Group words into segments using sentence boundaries from utterances
-    // or fall back to splitting by pauses > 500ms
-    const segments = groupWordsIntoSegments(words);
+    // Use utterances (speaker-labeled) when available, fall back to pause-based grouping
+    let segments: TranscriptSegment[];
+    const utterances = transcript.utterances ?? [];
 
+    if (utterances.length > 0) {
+      segments = utterances.map((u) => ({
+        text: u.text,
+        start: u.start,
+        end: u.end,
+        speaker: u.speaker,
+        words: (u.words ?? []).map((w) => ({
+          text: w.text,
+          start: w.start,
+          end: w.end,
+          confidence: w.confidence,
+        })),
+      }));
+    } else {
+      segments = groupWordsIntoSegments(words);
+    }
+
+    // Smooth speaker labels to fix isolated misdetections.
+    // If a single segment has a different speaker than both its neighbors,
+    // it's likely a diarization error — correct it to match neighbors.
+    segments = smoothSpeakerLabels(segments);
+
+    const speakers = new Set(segments.map((s) => s.speaker).filter(Boolean));
     console.log(
-      `[assemblyai] Transcription complete: ${words.length} words, ${segments.length} segments`,
+      `[assemblyai] Transcription complete: ${words.length} words, ${segments.length} segments, ${speakers.size} speaker(s)`,
     );
 
     return {
@@ -114,4 +139,79 @@ function buildSegment(words: TranscriptWord[]): TranscriptSegment {
     end: words[words.length - 1].end,
     words,
   };
+}
+
+/**
+ * Smooth speaker labels to correct isolated misdetections.
+ * Uses two passes:
+ * 1. If a single segment has a different speaker than BOTH neighbors, flip it.
+ * 2. For short segments (<1.5s) that differ from the previous AND next speaker
+ *    which agree with each other, flip to match the surrounding context.
+ */
+function smoothSpeakerLabels(
+  segments: TranscriptSegment[],
+): TranscriptSegment[] {
+  if (segments.length < 3) return segments;
+
+  const result = segments.map((s) => ({ ...s }));
+  let corrections = 0;
+
+  for (let i = 1; i < result.length - 1; i++) {
+    const prev = result[i - 1].speaker;
+    const curr = result[i].speaker;
+    const next = result[i + 1].speaker;
+
+    if (!curr || !prev || !next) continue;
+
+    // Both neighbors agree but current differs → likely a misdetection
+    if (prev === next && curr !== prev) {
+      const durationSec = (result[i].end - result[i].start) / 1000;
+      // For short segments, always correct. For longer ones, only if < 3s.
+      if (durationSec < 3) {
+        result[i].speaker = prev;
+        corrections++;
+      }
+    }
+  }
+
+  // Second pass: correct pairs of segments sandwiched between same-speaker blocks
+  // e.g. A A B B A A → the two B's might be misdetections if they are short
+  for (let i = 1; i < result.length - 1; i++) {
+    const prev = result[i - 1].speaker;
+    const curr = result[i].speaker;
+
+    if (!curr || !prev) continue;
+
+    // Check if this is a short isolated run (1-2 segments) between same-speaker blocks
+    if (curr !== prev) {
+      // Find the end of this different-speaker run
+      let runEnd = i;
+      while (runEnd < result.length && result[runEnd].speaker === curr) {
+        runEnd++;
+      }
+      const runLength = runEnd - i;
+
+      // If it's a short run (1-2 segments) and the speaker after matches before
+      if (
+        runLength <= 2 &&
+        runEnd < result.length &&
+        result[runEnd].speaker === prev
+      ) {
+        // Check total duration of the run
+        const runDuration = (result[runEnd - 1].end - result[i].start) / 1000;
+        if (runDuration < 2) {
+          for (let j = i; j < runEnd; j++) {
+            result[j].speaker = prev;
+            corrections++;
+          }
+        }
+      }
+    }
+  }
+
+  if (corrections > 0) {
+    console.log(`[assemblyai] Smoothed ${corrections} speaker label(s)`);
+  }
+
+  return result;
 }

@@ -89,6 +89,7 @@ export type TranslationCountAggregateOutputType = {
   synthesizedAudioKey: number
   resultVideoKey: number
   fishAudioVoiceId: number
+  fishAudioVoiceMap: number
   errorMessage: number
   errorStep: number
   retryCount: number
@@ -163,6 +164,7 @@ export type TranslationCountAggregateInputType = {
   synthesizedAudioKey?: true
   resultVideoKey?: true
   fishAudioVoiceId?: true
+  fishAudioVoiceMap?: true
   errorMessage?: true
   errorStep?: true
   retryCount?: true
@@ -272,6 +274,7 @@ export type TranslationGroupByOutputType = {
   synthesizedAudioKey: string | null
   resultVideoKey: string | null
   fishAudioVoiceId: string | null
+  fishAudioVoiceMap: runtime.JsonValue | null
   errorMessage: string | null
   errorStep: $Enums.PipelineStep | null
   retryCount: number
@@ -317,6 +320,7 @@ export type TranslationWhereInput = {
   synthesizedAudioKey?: Prisma.StringNullableFilter<"Translation"> | string | null
   resultVideoKey?: Prisma.StringNullableFilter<"Translation"> | string | null
   fishAudioVoiceId?: Prisma.StringNullableFilter<"Translation"> | string | null
+  fishAudioVoiceMap?: Prisma.JsonNullableFilter<"Translation">
   errorMessage?: Prisma.StringNullableFilter<"Translation"> | string | null
   errorStep?: Prisma.EnumPipelineStepNullableFilter<"Translation"> | $Enums.PipelineStep | null
   retryCount?: Prisma.IntFilter<"Translation"> | number
@@ -340,6 +344,7 @@ export type TranslationOrderByWithRelationInput = {
   synthesizedAudioKey?: Prisma.SortOrderInput | Prisma.SortOrder
   resultVideoKey?: Prisma.SortOrderInput | Prisma.SortOrder
   fishAudioVoiceId?: Prisma.SortOrderInput | Prisma.SortOrder
+  fishAudioVoiceMap?: Prisma.SortOrderInput | Prisma.SortOrder
   errorMessage?: Prisma.SortOrderInput | Prisma.SortOrder
   errorStep?: Prisma.SortOrderInput | Prisma.SortOrder
   retryCount?: Prisma.SortOrder
@@ -366,6 +371,7 @@ export type TranslationWhereUniqueInput = Prisma.AtLeast<{
   synthesizedAudioKey?: Prisma.StringNullableFilter<"Translation"> | string | null
   resultVideoKey?: Prisma.StringNullableFilter<"Translation"> | string | null
   fishAudioVoiceId?: Prisma.StringNullableFilter<"Translation"> | string | null
+  fishAudioVoiceMap?: Prisma.JsonNullableFilter<"Translation">
   errorMessage?: Prisma.StringNullableFilter<"Translation"> | string | null
   errorStep?: Prisma.EnumPipelineStepNullableFilter<"Translation"> | $Enums.PipelineStep | null
   retryCount?: Prisma.IntFilter<"Translation"> | number
@@ -389,6 +395,7 @@ export type TranslationOrderByWithAggregationInput = {
   synthesizedAudioKey?: Prisma.SortOrderInput | Prisma.SortOrder
   resultVideoKey?: Prisma.SortOrderInput | Prisma.SortOrder
   fishAudioVoiceId?: Prisma.SortOrderInput | Prisma.SortOrder
+  fishAudioVoiceMap?: Prisma.SortOrderInput | Prisma.SortOrder
   errorMessage?: Prisma.SortOrderInput | Prisma.SortOrder
   errorStep?: Prisma.SortOrderInput | Prisma.SortOrder
   retryCount?: Prisma.SortOrder
@@ -419,6 +426,7 @@ export type TranslationScalarWhereWithAggregatesInput = {
   synthesizedAudioKey?: Prisma.StringNullableWithAggregatesFilter<"Translation"> | string | null
   resultVideoKey?: Prisma.StringNullableWithAggregatesFilter<"Translation"> | string | null
   fishAudioVoiceId?: Prisma.StringNullableWithAggregatesFilter<"Translation"> | string | null
+  fishAudioVoiceMap?: Prisma.JsonNullableWithAggregatesFilter<"Translation">
   errorMessage?: Prisma.StringNullableWithAggregatesFilter<"Translation"> | string | null
   errorStep?: Prisma.EnumPipelineStepNullableWithAggregatesFilter<"Translation"> | $Enums.PipelineStep | null
   retryCount?: Prisma.IntWithAggregatesFilter<"Translation"> | number
@@ -440,6 +448,7 @@ export type TranslationCreateInput = {
   synthesizedAudioKey?: string | null
   resultVideoKey?: string | null
   fishAudioVoiceId?: string | null
+  fishAudioVoiceMap?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   errorMessage?: string | null
   errorStep?: $Enums.PipelineStep | null
   retryCount?: number
@@ -463,6 +472,7 @@ export type TranslationUncheckedCreateInput = {
   synthesizedAudioKey?: string | null
   resultVideoKey?: string | null
   fishAudioVoiceId?: string | null
+  fishAudioVoiceMap?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   errorMessage?: string | null
   errorStep?: $Enums.PipelineStep | null
   retryCount?: number
@@ -484,6 +494,7 @@ export type TranslationUpdateInput = {
   synthesizedAudioKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   resultVideoKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   fishAudioVoiceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  fishAudioVoiceMap?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   errorMessage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   errorStep?: Prisma.NullableEnumPipelineStepFieldUpdateOperationsInput | $Enums.PipelineStep | null
   retryCount?: Prisma.IntFieldUpdateOperationsInput | number
@@ -507,6 +518,7 @@ export type TranslationUncheckedUpdateInput = {
   synthesizedAudioKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   resultVideoKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   fishAudioVoiceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  fishAudioVoiceMap?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   errorMessage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   errorStep?: Prisma.NullableEnumPipelineStepFieldUpdateOperationsInput | $Enums.PipelineStep | null
   retryCount?: Prisma.IntFieldUpdateOperationsInput | number
@@ -529,6 +541,7 @@ export type TranslationCreateManyInput = {
   synthesizedAudioKey?: string | null
   resultVideoKey?: string | null
   fishAudioVoiceId?: string | null
+  fishAudioVoiceMap?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   errorMessage?: string | null
   errorStep?: $Enums.PipelineStep | null
   retryCount?: number
@@ -550,6 +563,7 @@ export type TranslationUpdateManyMutationInput = {
   synthesizedAudioKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   resultVideoKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   fishAudioVoiceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  fishAudioVoiceMap?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   errorMessage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   errorStep?: Prisma.NullableEnumPipelineStepFieldUpdateOperationsInput | $Enums.PipelineStep | null
   retryCount?: Prisma.IntFieldUpdateOperationsInput | number
@@ -572,6 +586,7 @@ export type TranslationUncheckedUpdateManyInput = {
   synthesizedAudioKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   resultVideoKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   fishAudioVoiceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  fishAudioVoiceMap?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   errorMessage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   errorStep?: Prisma.NullableEnumPipelineStepFieldUpdateOperationsInput | $Enums.PipelineStep | null
   retryCount?: Prisma.IntFieldUpdateOperationsInput | number
@@ -604,6 +619,7 @@ export type TranslationCountOrderByAggregateInput = {
   synthesizedAudioKey?: Prisma.SortOrder
   resultVideoKey?: Prisma.SortOrder
   fishAudioVoiceId?: Prisma.SortOrder
+  fishAudioVoiceMap?: Prisma.SortOrder
   errorMessage?: Prisma.SortOrder
   errorStep?: Prisma.SortOrder
   retryCount?: Prisma.SortOrder
@@ -737,6 +753,7 @@ export type TranslationCreateWithoutVideoInput = {
   synthesizedAudioKey?: string | null
   resultVideoKey?: string | null
   fishAudioVoiceId?: string | null
+  fishAudioVoiceMap?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   errorMessage?: string | null
   errorStep?: $Enums.PipelineStep | null
   retryCount?: number
@@ -758,6 +775,7 @@ export type TranslationUncheckedCreateWithoutVideoInput = {
   synthesizedAudioKey?: string | null
   resultVideoKey?: string | null
   fishAudioVoiceId?: string | null
+  fishAudioVoiceMap?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   errorMessage?: string | null
   errorStep?: $Enums.PipelineStep | null
   retryCount?: number
@@ -809,6 +827,7 @@ export type TranslationScalarWhereInput = {
   synthesizedAudioKey?: Prisma.StringNullableFilter<"Translation"> | string | null
   resultVideoKey?: Prisma.StringNullableFilter<"Translation"> | string | null
   fishAudioVoiceId?: Prisma.StringNullableFilter<"Translation"> | string | null
+  fishAudioVoiceMap?: Prisma.JsonNullableFilter<"Translation">
   errorMessage?: Prisma.StringNullableFilter<"Translation"> | string | null
   errorStep?: Prisma.EnumPipelineStepNullableFilter<"Translation"> | $Enums.PipelineStep | null
   retryCount?: Prisma.IntFilter<"Translation"> | number
@@ -830,6 +849,7 @@ export type TranslationCreateManyVideoInput = {
   synthesizedAudioKey?: string | null
   resultVideoKey?: string | null
   fishAudioVoiceId?: string | null
+  fishAudioVoiceMap?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   errorMessage?: string | null
   errorStep?: $Enums.PipelineStep | null
   retryCount?: number
@@ -851,6 +871,7 @@ export type TranslationUpdateWithoutVideoInput = {
   synthesizedAudioKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   resultVideoKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   fishAudioVoiceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  fishAudioVoiceMap?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   errorMessage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   errorStep?: Prisma.NullableEnumPipelineStepFieldUpdateOperationsInput | $Enums.PipelineStep | null
   retryCount?: Prisma.IntFieldUpdateOperationsInput | number
@@ -872,6 +893,7 @@ export type TranslationUncheckedUpdateWithoutVideoInput = {
   synthesizedAudioKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   resultVideoKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   fishAudioVoiceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  fishAudioVoiceMap?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   errorMessage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   errorStep?: Prisma.NullableEnumPipelineStepFieldUpdateOperationsInput | $Enums.PipelineStep | null
   retryCount?: Prisma.IntFieldUpdateOperationsInput | number
@@ -893,6 +915,7 @@ export type TranslationUncheckedUpdateManyWithoutVideoInput = {
   synthesizedAudioKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   resultVideoKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   fishAudioVoiceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  fishAudioVoiceMap?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   errorMessage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   errorStep?: Prisma.NullableEnumPipelineStepFieldUpdateOperationsInput | $Enums.PipelineStep | null
   retryCount?: Prisma.IntFieldUpdateOperationsInput | number
@@ -917,6 +940,7 @@ export type TranslationSelect<ExtArgs extends runtime.Types.Extensions.InternalA
   synthesizedAudioKey?: boolean
   resultVideoKey?: boolean
   fishAudioVoiceId?: boolean
+  fishAudioVoiceMap?: boolean
   errorMessage?: boolean
   errorStep?: boolean
   retryCount?: boolean
@@ -940,6 +964,7 @@ export type TranslationSelectCreateManyAndReturn<ExtArgs extends runtime.Types.E
   synthesizedAudioKey?: boolean
   resultVideoKey?: boolean
   fishAudioVoiceId?: boolean
+  fishAudioVoiceMap?: boolean
   errorMessage?: boolean
   errorStep?: boolean
   retryCount?: boolean
@@ -963,6 +988,7 @@ export type TranslationSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.E
   synthesizedAudioKey?: boolean
   resultVideoKey?: boolean
   fishAudioVoiceId?: boolean
+  fishAudioVoiceMap?: boolean
   errorMessage?: boolean
   errorStep?: boolean
   retryCount?: boolean
@@ -986,6 +1012,7 @@ export type TranslationSelectScalar = {
   synthesizedAudioKey?: boolean
   resultVideoKey?: boolean
   fishAudioVoiceId?: boolean
+  fishAudioVoiceMap?: boolean
   errorMessage?: boolean
   errorStep?: boolean
   retryCount?: boolean
@@ -995,7 +1022,7 @@ export type TranslationSelectScalar = {
   updatedAt?: boolean
 }
 
-export type TranslationOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "videoId" | "targetLanguage" | "status" | "currentStep" | "progress" | "extractedAudioKey" | "transcriptJson" | "translatedJson" | "synthesizedAudioKey" | "resultVideoKey" | "fishAudioVoiceId" | "errorMessage" | "errorStep" | "retryCount" | "startedAt" | "completedAt" | "createdAt" | "updatedAt", ExtArgs["result"]["translation"]>
+export type TranslationOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "videoId" | "targetLanguage" | "status" | "currentStep" | "progress" | "extractedAudioKey" | "transcriptJson" | "translatedJson" | "synthesizedAudioKey" | "resultVideoKey" | "fishAudioVoiceId" | "fishAudioVoiceMap" | "errorMessage" | "errorStep" | "retryCount" | "startedAt" | "completedAt" | "createdAt" | "updatedAt", ExtArgs["result"]["translation"]>
 export type TranslationInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   video?: boolean | Prisma.VideoDefaultArgs<ExtArgs>
 }
@@ -1024,6 +1051,7 @@ export type $TranslationPayload<ExtArgs extends runtime.Types.Extensions.Interna
     synthesizedAudioKey: string | null
     resultVideoKey: string | null
     fishAudioVoiceId: string | null
+    fishAudioVoiceMap: runtime.JsonValue | null
     errorMessage: string | null
     errorStep: $Enums.PipelineStep | null
     retryCount: number
@@ -1467,6 +1495,7 @@ export interface TranslationFieldRefs {
   readonly synthesizedAudioKey: Prisma.FieldRef<"Translation", 'String'>
   readonly resultVideoKey: Prisma.FieldRef<"Translation", 'String'>
   readonly fishAudioVoiceId: Prisma.FieldRef<"Translation", 'String'>
+  readonly fishAudioVoiceMap: Prisma.FieldRef<"Translation", 'Json'>
   readonly errorMessage: Prisma.FieldRef<"Translation", 'String'>
   readonly errorStep: Prisma.FieldRef<"Translation", 'PipelineStep'>
   readonly retryCount: Prisma.FieldRef<"Translation", 'Int'>

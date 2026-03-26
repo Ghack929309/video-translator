@@ -407,6 +407,7 @@ export const pipeline = {
         text: string;
         start: number;
         end: number;
+        speaker?: string;
         words: {
           text: string;
           start: number;
@@ -435,8 +436,9 @@ export const pipeline = {
 
   /**
    * Step 5 — CLONE_VOICE
-   * Download the extracted source audio, send it to Fish Audio to create
-   * a voice model, store the model ID on the translation record.
+   * Detect unique speakers from the transcript, extract per-speaker audio
+   * samples from the source, clone a voice model for each speaker via Fish Audio.
+   * Falls back to single-voice cloning when no speaker labels are present.
    */
   async stepCloneVoice(translationId: string) {
     const translation = await db.translation.findUniqueOrThrow({
@@ -444,8 +446,8 @@ export const pipeline = {
       include: { video: true },
     });
 
-    // Skip if already cloned
-    if (translation.fishAudioVoiceId) {
+    // Skip if already cloned (check both single-voice and multi-voice fields)
+    if (translation.fishAudioVoiceMap || translation.fishAudioVoiceId) {
       console.log(`[pipeline] Step CLONE_VOICE skipped — voice already cloned`);
       await updateTranslation(translationId, {
         currentStep: "CLONE_VOICE",
@@ -459,17 +461,18 @@ export const pipeline = {
         "No extracted audio key — EXTRACT_AUDIO step may have been skipped",
       );
     }
+    if (!translation.transcriptJson) {
+      throw new Error(
+        "No transcript JSON — TRANSCRIBE step may have been skipped",
+      );
+    }
 
     await updateTranslation(translationId, {
       currentStep: "CLONE_VOICE",
       progress: 60,
     });
 
-    console.log(
-      `[pipeline] Step CLONE_VOICE — cloning voice from source audio`,
-    );
-
-    // Download source audio to /tmp for Fish Audio upload
+    // Download source audio to /tmp
     const tmpDir = path.join(os.tmpdir(), "dubly", translationId);
     fs.mkdirSync(tmpDir, { recursive: true });
     const audioPath = path.join(tmpDir, "voice-sample.wav");
@@ -484,21 +487,98 @@ export const pipeline = {
     ws.end();
     await new Promise<void>((resolve) => ws.on("finish", resolve));
 
-    // Trim to 30s and compress to MP3 to stay under Fish Audio's upload limit
-    const trimmedPath = path.join(tmpDir, "voice-sample-trimmed.mp3");
-    await ffmpeg.trimAndCompress(audioPath, trimmedPath, 30);
+    // Parse transcript to find unique speakers
+    const transcript = translation.transcriptJson as unknown as {
+      segments: {
+        text: string;
+        start: number;
+        end: number;
+        speaker?: string;
+      }[];
+    };
+    const speakerSegments = new Map<string, { start: number; end: number }[]>();
 
-    const voiceId = await fishAudio.createVoiceModel(
-      trimmedPath,
-      `dubly-${translationId}`,
+    for (const seg of transcript.segments) {
+      const speaker = seg.speaker ?? "A";
+      if (!speakerSegments.has(speaker)) {
+        speakerSegments.set(speaker, []);
+      }
+      speakerSegments.get(speaker)!.push({ start: seg.start, end: seg.end });
+    }
+
+    const speakers = Array.from(speakerSegments.keys());
+    console.log(
+      `[pipeline] Step CLONE_VOICE — detected ${speakers.length} speaker(s): ${speakers.join(", ")}`,
     );
 
+    // Clone a voice for each speaker
+    const voiceMap: Record<string, string> = {};
+
+    for (let si = 0; si < speakers.length; si++) {
+      const speaker = speakers[si];
+      const segments = speakerSegments.get(speaker)!;
+
+      // Extract up to 30s of this speaker's audio segments
+      const speakerParts: string[] = [];
+      let totalDuration = 0;
+
+      for (let j = 0; j < segments.length && totalDuration < 30; j++) {
+        const seg = segments[j];
+        const startSec = seg.start / 1000;
+        const endSec = seg.end / 1000;
+        const segDur = endSec - startSec;
+        if (segDur < 0.3) continue; // skip very short segments
+
+        const partPath = path.join(tmpDir, `speaker-${speaker}-part-${j}.wav`);
+        await ffmpeg.extractTimeRange(audioPath, startSec, endSec, partPath);
+        speakerParts.push(partPath);
+        totalDuration += segDur;
+      }
+
+      if (speakerParts.length === 0) {
+        console.warn(
+          `[pipeline] No usable audio for speaker ${speaker}, skipping`,
+        );
+        continue;
+      }
+
+      // Concatenate speaker parts into a single sample
+      const speakerSamplePath = path.join(
+        tmpDir,
+        `speaker-${speaker}-sample.wav`,
+      );
+      await ffmpeg.concatenateAudio(speakerParts, speakerSamplePath);
+
+      // Trim + compress for Fish Audio upload limit
+      const trimmedPath = path.join(tmpDir, `speaker-${speaker}-trimmed.mp3`);
+      await ffmpeg.trimAndCompress(speakerSamplePath, trimmedPath, 30);
+
+      const voiceId = await fishAudio.createVoiceModel(
+        trimmedPath,
+        `dubly-${translationId}-${speaker}`,
+      );
+      voiceMap[speaker] = voiceId;
+
+      console.log(
+        `[pipeline] Cloned voice for speaker ${speaker}: ${voiceId} (${totalDuration.toFixed(1)}s sample)`,
+      );
+
+      // Update progress per speaker
+      const progress = 60 + Math.round(((si + 1) / speakers.length) * 5);
+      await updateTranslation(translationId, { progress });
+    }
+
+    // Store voice mapping — use voiceMap for multi, fishAudioVoiceId for single-speaker compat
+    const firstVoiceId = Object.values(voiceMap)[0] ?? null;
     await updateTranslation(translationId, {
-      fishAudioVoiceId: voiceId,
+      fishAudioVoiceMap: voiceMap as unknown as Record<string, unknown>,
+      fishAudioVoiceId: firstVoiceId,
       progress: STEP_PROGRESS.CLONE_VOICE,
     });
 
-    console.log(`[pipeline] Step CLONE_VOICE complete — voice ID: ${voiceId}`);
+    console.log(
+      `[pipeline] Step CLONE_VOICE complete — ${Object.keys(voiceMap).length} voice(s) cloned`,
+    );
   },
 
   /**
@@ -524,7 +604,7 @@ export const pipeline = {
       return;
     }
 
-    if (!translation.fishAudioVoiceId) {
+    if (!translation.fishAudioVoiceId && !translation.fishAudioVoiceMap) {
       throw new Error(
         "No Fish Audio voice ID — CLONE_VOICE step may have been skipped",
       );
@@ -540,10 +620,19 @@ export const pipeline = {
       progress: 70,
     });
 
+    // Build speaker → voiceId lookup
+    const voiceMap = (translation.fishAudioVoiceMap ?? {}) as Record<
+      string,
+      string
+    >;
+    const defaultVoiceId =
+      translation.fishAudioVoiceId ?? Object.values(voiceMap)[0];
+
     const segments = translation.translatedJson as unknown as {
       translatedText: string;
       start: number;
       end: number;
+      speaker?: string;
     }[];
 
     console.log(
@@ -553,21 +642,29 @@ export const pipeline = {
     const tmpDir = path.join(os.tmpdir(), "dubly", translationId);
     fs.mkdirSync(tmpDir, { recursive: true });
 
-    // Build an ordered list of audio file paths (silence + speech alternating)
+    // Build an ordered list of audio file paths using ABSOLUTE position tracking.
+    // This prevents cumulative drift — each segment is placed at its exact timestamp.
     const audioParts: string[] = [];
+    let runningPositionMs = 0; // tracks where we are in the output audio timeline
 
     for (let i = 0; i < segments.length; i++) {
       const seg = segments[i];
       const segDurationSec = (seg.end - seg.start) / 1000;
 
-      // Add silence gap before this segment (from previous end to this start)
-      const prevEnd = i === 0 ? 0 : segments[i - 1].end;
-      const gapSec = (seg.start - prevEnd) / 1000;
+      // Silence gap: use absolute position to compute gap, not relative to prev segment
+      const gapMs = seg.start - runningPositionMs;
+      const gapSec = gapMs / 1000;
 
-      if (gapSec > 0.05) {
+      if (gapSec > 0.02) {
         const silencePath = path.join(tmpDir, `silence-${i}.wav`);
         await ffmpeg.generateSilence(gapSec, silencePath);
         audioParts.push(silencePath);
+        runningPositionMs += gapMs;
+      } else if (gapSec < -0.05) {
+        // Negative gap means we've drifted ahead — log but don't insert negative silence
+        console.warn(
+          `[pipeline] Segment ${i} drift: ${gapSec.toFixed(3)}s ahead of expected position`,
+        );
       }
 
       // Generate TTS for the segment
@@ -575,16 +672,43 @@ export const pipeline = {
       const stretchedPath = path.join(tmpDir, `tts-stretched-${i}.wav`);
 
       try {
+        // Use the correct voice for this speaker
+        const speakerVoiceId = voiceMap[seg.speaker ?? "A"] ?? defaultVoiceId;
+        if (!speakerVoiceId) {
+          throw new Error(`No voice ID for speaker ${seg.speaker ?? "A"}`);
+        }
+
+        // Estimate prosody speed hint: if translated text is much longer/shorter
+        // than the time slot allows, hint Fish Audio to speak faster/slower
+        // This reduces the amount of post-processing stretch needed
+        const avgCharsPerSec = 14; // rough estimate for natural speech
+        const expectedDuration = seg.translatedText.length / avgCharsPerSec;
+        const prosodySpeed =
+          segDurationSec > 0.5 && expectedDuration > 0
+            ? Math.max(0.7, Math.min(1.8, expectedDuration / segDurationSec))
+            : undefined;
+
         const audioBuffer = await fishAudio.synthesize(
           seg.translatedText,
-          translation.fishAudioVoiceId,
+          speakerVoiceId,
           translation.targetLanguage,
+          prosodySpeed,
         );
         fs.writeFileSync(rawPath, audioBuffer);
 
-        // Time-stretch to match original segment duration
+        // Time-stretch to EXACT target duration (with clamping, truncate/pad)
         if (segDurationSec > 0.1) {
-          await ffmpeg.timeStretch(rawPath, segDurationSec, stretchedPath);
+          const { stretchRatio } = await ffmpeg.timeStretchExact(
+            rawPath,
+            segDurationSec,
+            stretchedPath,
+          );
+          if (stretchRatio > 1.8 || stretchRatio < 0.6) {
+            console.warn(
+              `[pipeline] Segment ${i}: extreme stretch ratio ${stretchRatio.toFixed(2)} ` +
+                `(TTS generated ${(await ffmpeg.getDuration(rawPath)).toFixed(1)}s for ${segDurationSec.toFixed(1)}s slot)`,
+            );
+          }
           audioParts.push(stretchedPath);
         } else {
           audioParts.push(rawPath);
@@ -601,6 +725,9 @@ export const pipeline = {
         );
         audioParts.push(fallbackPath);
       }
+
+      // Advance running position by exactly the segment duration (absolute alignment)
+      runningPositionMs = seg.end;
 
       // Update progress proportionally
       const segProgress = 70 + Math.round((i / segments.length) * 10);

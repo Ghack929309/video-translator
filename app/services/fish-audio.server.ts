@@ -95,12 +95,16 @@ export const fishAudio = {
     text: string,
     referenceId: string,
     targetLanguage?: string,
+    prosodySpeed?: number,
   ): Promise<Buffer> {
     // Wrap text with a native-speaker language hint to reduce accent bleeding
     const langHint = targetLanguage
       ? (LANGUAGE_HINTS[targetLanguage] ?? "")
       : "";
     const instructedText = langHint ? `${langHint}\n${text}` : text;
+
+    // Clamp prosody speed to Fish Audio's reasonable range (0.5–2.0)
+    const speed = prosodySpeed ? Math.max(0.5, Math.min(2.0, prosodySpeed)) : 1;
 
     const res = await fetch(`${BASE_URL}/v1/tts`, {
       method: "POST",
@@ -113,6 +117,7 @@ export const fishAudio = {
         reference_id: referenceId,
         format: "wav",
         latency: "normal",
+        prosody: { speed, volume: 0 },
       }),
     });
 

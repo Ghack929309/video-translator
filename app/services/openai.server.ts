@@ -7,6 +7,37 @@ import type { TranscriptSegment } from "~/services/assemblyai.server";
 const client = new OpenAI({ apiKey: env.OPENAI_API_KEY });
 
 /**
+ * Map language codes to full names so GPT gets unambiguous instructions.
+ */
+const LANGUAGE_NAMES: Record<string, string> = {
+  en: "English",
+  fr: "French",
+  es: "Spanish",
+  de: "German",
+  it: "Italian",
+  pt: "Portuguese",
+  ja: "Japanese",
+  ko: "Korean",
+  zh: "Chinese (Mandarin)",
+  ru: "Russian",
+  ar: "Arabic",
+  hi: "Hindi",
+  nl: "Dutch",
+  pl: "Polish",
+  tr: "Turkish",
+  vi: "Vietnamese",
+  th: "Thai",
+  id: "Indonesian",
+  sv: "Swedish",
+  uk: "Ukrainian",
+  ht: "Haitian Creole",
+};
+
+function getLanguageName(code: string): string {
+  return LANGUAGE_NAMES[code] ?? code;
+}
+
+/**
  * A translated segment preserving the original timing.
  */
 export interface TranslatedSegment {
@@ -14,6 +45,7 @@ export interface TranslatedSegment {
   translatedText: string;
   start: number; // ms
   end: number; // ms
+  speaker?: string;
 }
 
 const TranslatedSegmentSchema = z.object({
@@ -47,9 +79,16 @@ export const openaiService = {
       const batchIndex = Math.floor(i / BATCH_SIZE) + 1;
       const totalBatches = Math.ceil(segments.length / BATCH_SIZE);
 
-      console.log(`[openai] Translating batch ${batchIndex}/${totalBatches} (${batch.length} segments)`);
+      console.log(
+        `[openai] Translating batch ${batchIndex}/${totalBatches} (${batch.length} segments)`,
+      );
 
-      const translated = await this.translateBatch(batch, i, targetLanguage, sourceLanguage);
+      const translated = await this.translateBatch(
+        batch,
+        i,
+        targetLanguage,
+        sourceLanguage,
+      );
       allTranslated.push(...translated);
     }
 
@@ -69,20 +108,29 @@ export const openaiService = {
       .map((s, i) => `[${startIndex + i}] ${s.text}`)
       .join("\n");
 
-    const sourceLang = sourceLanguage ? ` from ${sourceLanguage}` : "";
+    const targetLangName = getLanguageName(targetLanguage);
+    const sourceLangName = sourceLanguage
+      ? getLanguageName(sourceLanguage)
+      : null;
+    const sourceLangNote = sourceLangName
+      ? `The source audio is in ${sourceLangName}. `
+      : "";
 
     const completion = await client.chat.completions.parse({
       model: "gpt-4o-mini",
       messages: [
         {
           role: "system",
-          content: `You are a professional video dubbing translator. Translate the following speech segments${sourceLang} to ${targetLanguage}.
+          content: `You are a professional video dubbing translator. ${sourceLangNote}Translate ALL of the following speech segments into ${targetLangName}.
 
-Rules:
+CRITICAL RULES:
+- EVERY segment MUST be translated into ${targetLangName}. Never output text in any other language.
+- If a segment is already in ${targetLangName}, still return it (clean it up if needed).
+- If a segment is in a third language (neither source nor target), translate it into ${targetLangName} anyway.
 - Preserve the meaning, tone, and register of the original speech.
 - Keep translations natural and conversational — this will be spoken aloud.
 - Maintain roughly similar length to the original (the translated audio must fit the same time window).
-- Handle idioms by finding equivalent expressions in the target language.
+- Handle idioms by finding equivalent expressions in ${targetLangName}.
 - Do NOT add or remove segments. Translate each segment indexed exactly as given.
 - Return ONLY the translated text for each segment index.`,
         },
@@ -91,7 +139,10 @@ Rules:
           content: segmentList,
         },
       ],
-      response_format: zodResponseFormat(TranslatedSegmentSchema, "translation"),
+      response_format: zodResponseFormat(
+        TranslatedSegmentSchema,
+        "translation",
+      ),
       temperature: 0.3,
     });
 
@@ -110,6 +161,7 @@ Rules:
         translatedText: match?.translatedText ?? original.text,
         start: original.start,
         end: original.end,
+        speaker: original.speaker,
       };
     });
   },

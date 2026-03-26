@@ -114,6 +114,7 @@ export const TranslationScalarFieldEnum = {
   synthesizedAudioKey: 'synthesizedAudioKey',
   resultVideoKey: 'resultVideoKey',
   fishAudioVoiceId: 'fishAudioVoiceId',
+  fishAudioVoiceMap: 'fishAudioVoiceMap',
   errorMessage: 'errorMessage',
   errorStep: 'errorStep',
   retryCount: 'retryCount',

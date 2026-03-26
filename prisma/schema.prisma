@@ -47,6 +47,7 @@ model Translation {
   synthesizedAudioKey String?
   resultVideoKey      String?
   fishAudioVoiceId    String?
+  fishAudioVoiceMap   Json?
   errorMessage        String?
   errorStep           PipelineStep?
   retryCount          Int               @default(0)
