@@ -139,28 +139,25 @@ export const cosyvoice = {
       `[cosyvoice] Synthesizing (mode: ${mode}, target: ${targetLanguage}, speed: ${clampedSpeed})...`,
     );
 
-    // Build multipart/form-data
-    const form = new FormData();
-    form.append("tts_text", text);
-    form.append("mode", mode);
-    form.append("stream", "false");
-    form.append("speed", String(clampedSpeed));
-
-    // Attach speaker reference audio
+    // Read and encode reference audio as base64
     const wavBuffer = fs.readFileSync(promptWavPath);
-    const wavBlob = new Blob([wavBuffer], { type: "audio/wav" });
-    form.append("prompt_wav", wavBlob, "reference.wav");
+    const wavBase64 = wavBuffer.toString("base64");
 
-    // zero_shot mode requires prompt_text with special prefix
-    if (mode === "zero_shot") {
-      const prefix = "You are a helpful assistant.<|endofprompt|>";
-      const fullPromptText = promptText
-        ? `${prefix}${promptText}`
-        : prefix;
-      form.append("prompt_text", fullPromptText);
+    // Build JSON payload for RunPod Serverless
+    const payload: Record<string, any> = {
+      input: {
+        tts_text: text,
+        mode,
+        prompt_wav: wavBase64,
+        speed: clampedSpeed,
+      },
+    };
+
+    if (mode === "zero_shot" && promptText) {
+      payload.input.prompt_text = promptText;
     }
 
-    // Retry loop with exponential backoff (matching Fish Audio pattern)
+    // Retry loop with exponential backoff
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -173,9 +170,15 @@ export const cosyvoice = {
       }
 
       try {
-        const res = await fetch(`${env.COSYVOICE_URL}/inference`, {
+        // RunPod synchronous serverless endpoint
+        const res = await fetch(`${env.COSYVOICE_URL}/runsync`, {
           method: "POST",
-          body: form,
+          headers: {
+            "Content-Type": "application/json",
+            // Optional: attach RunPod API key if environment uses auth
+            ...(env.RUNPOD_API_KEY ? { Authorization: `Bearer ${env.RUNPOD_API_KEY}` } : {}),
+          },
+          body: JSON.stringify(payload),
         });
 
         if (!res.ok) {
@@ -185,21 +188,31 @@ export const cosyvoice = {
           );
         }
 
-        const arrayBuffer = await res.arrayBuffer();
-        const pcmBuffer = Buffer.from(arrayBuffer);
+        // RunPod wrapper format: { delayTime, executionTime, id, status, output: { audio, sample_rate, duration_sec } }
+        const jsonResponse = await res.json() as any;
+
+        if (jsonResponse.status !== "COMPLETED" || !jsonResponse.output) {
+          throw new Error(`RunPod job failed or returned no output: ${JSON.stringify(jsonResponse)}`);
+        }
+
+        if (jsonResponse.output.error) {
+          throw new Error(`CosyVoice model error: ${jsonResponse.output.error}`);
+        }
+
+        const audioBase64 = jsonResponse.output.audio;
+        if (!audioBase64) {
+          throw new Error("CosyVoice returned empty audio payload");
+        }
+
+        // Decode base64 PCM bytes
+        const pcmBuffer = Buffer.from(audioBase64, "base64");
 
         // Validate: non-empty response
         if (pcmBuffer.length === 0) {
-          throw new Error("CosyVoice returned empty response");
+          throw new Error("CosyVoice decoded PCM buffer is empty");
         }
 
-        // Validate: duration estimation (catch garbage responses)
-        const durationSec = estimateDurationSec(pcmBuffer.length);
-        if (durationSec < 0.1) {
-          throw new Error(
-            `CosyVoice returned suspiciously short audio (${durationSec.toFixed(2)}s, ${pcmBuffer.length} bytes)`,
-          );
-        }
+        const durationSec = jsonResponse.output.duration_sec ?? estimateDurationSec(pcmBuffer.length);
 
         console.log(
           `[cosyvoice] Synthesized ${durationSec.toFixed(2)}s audio (${pcmBuffer.length} bytes PCM, mode: ${mode})`,

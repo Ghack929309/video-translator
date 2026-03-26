@@ -1,0 +1,26 @@
+# RunPod SDK
+runpod>=1.7.0
+
+# PyTorch (already in base image, pin for safety)
+# torch>=2.4.0
+# torchaudio>=2.4.0
+
+# Core deps
+numpy>=1.24.0
+huggingface_hub>=0.20.0
+soundfile>=0.12.1
+librosa>=0.10.0
+
+# CosyVoice dependencies
+conformer>=0.3.2
+diffusers>=0.28.0
+onnxruntime-gpu>=1.16.0
+pydub>=0.25.1
+inflect>=7.0.0
+hyperpyyaml>=1.2.0
+modelscope>=1.14.0
+
+# Note: torch and torchaudio come from the base Docker image.
+# CosyVoice repo's own requirements.txt is also installed in the Dockerfile.
+# If builds fail, cross-reference with:
+#   https://github.com/FunAudioLLM/CosyVoice/blob/main/requirements.txt

@@ -28,6 +28,7 @@ const envSchema = z.object({
 
   // CosyVoice (optional — required only when CosyVoice engine is selected)
   COSYVOICE_URL: z.string().url().optional(),
+  RUNPOD_API_KEY: z.string().optional(),
 
   // App
   APP_URL: z.string().url(),
