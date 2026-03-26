@@ -700,6 +700,7 @@ export const TranslationScalarFieldEnum = {
   id: 'id',
   videoId: 'videoId',
   targetLanguage: 'targetLanguage',
+  ttsEngine: 'ttsEngine',
   status: 'status',
   currentStep: 'currentStep',
   progress: 'progress',
@@ -836,6 +837,20 @@ export type IntFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'In
  * Reference to a field of type 'Int[]'
  */
 export type ListIntFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Int[]'>
+    
+
+
+/**
+ * Reference to a field of type 'TtsEngine'
+ */
+export type EnumTtsEngineFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'TtsEngine'>
+    
+
+
+/**
+ * Reference to a field of type 'TtsEngine[]'
+ */
+export type ListEnumTtsEngineFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'TtsEngine[]'>
     
 
 

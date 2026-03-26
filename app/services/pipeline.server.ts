@@ -29,7 +29,7 @@ const STEP_PROGRESS: Record<PipelineStep, number> = {
 };
 
 const MAX_STEP_RETRIES = 3;
-const JOB_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+const JOB_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes base timeout
 
 const ORDERED_STEPS: PipelineStep[] = [
   "DOWNLOAD",
@@ -84,10 +84,17 @@ async function withRetry(
  */
 export const pipeline = {
   async run(translationId: string) {
-    const translation = await db.translation.findUniqueOrThrow({
+    const translation = await db.translation.findUnique({
       where: { id: translationId },
       include: { video: true },
     });
+
+    if (!translation) {
+      console.warn(
+        `[pipeline] Translation ${translationId} not found — skipping (likely deleted)`,
+      );
+      return;
+    }
 
     const jobStart = Date.now();
 
@@ -671,6 +678,20 @@ export const pipeline = {
       const rawPath = path.join(tmpDir, `tts-raw-${i}.wav`);
       const stretchedPath = path.join(tmpDir, `tts-stretched-${i}.wav`);
 
+      // Skip empty/whitespace-only segments — insert silence instead of calling TTS
+      if (!seg.translatedText || seg.translatedText.trim().length === 0) {
+        console.warn(
+          `[pipeline] Segment ${i}: empty translated text, inserting silence (${segDurationSec.toFixed(1)}s)`,
+        );
+        const emptyPath = path.join(tmpDir, `empty-${i}.wav`);
+        await ffmpeg.generateSilence(Math.max(segDurationSec, 0.1), emptyPath);
+        audioParts.push(emptyPath);
+        runningPositionMs = seg.end;
+        const segProgress = 70 + Math.round((i / segments.length) * 10);
+        await updateTranslation(translationId, { progress: segProgress });
+        continue;
+      }
+
       try {
         // Use the correct voice for this speaker
         const speakerVoiceId = voiceMap[seg.speaker ?? "A"] ?? defaultVoiceId;
@@ -729,9 +750,16 @@ export const pipeline = {
       // Advance running position by exactly the segment duration (absolute alignment)
       runningPositionMs = seg.end;
 
-      // Update progress proportionally
-      const segProgress = 70 + Math.round((i / segments.length) * 10);
-      await updateTranslation(translationId, { progress: segProgress });
+      // Rate-limit: small delay between TTS calls to avoid hammering Fish Audio API
+      if (i < segments.length - 1) {
+        await new Promise((r) => setTimeout(r, 150));
+      }
+
+      // Update progress proportionally (batch DB writes every 5 segments)
+      if (i % 5 === 0 || i === segments.length - 1) {
+        const segProgress = 70 + Math.round((i / segments.length) * 10);
+        await updateTranslation(translationId, { progress: segProgress });
+      }
     }
 
     // Concatenate all parts into the final synthesized audio

@@ -26,6 +26,9 @@ const envSchema = z.object({
   // Fish Audio
   FISH_AUDIO_API_KEY: z.string().min(1),
 
+  // CosyVoice (optional — required only when CosyVoice engine is selected)
+  COSYVOICE_URL: z.string().url().optional(),
+
   // App
   APP_URL: z.string().url(),
   NODE_ENV: z

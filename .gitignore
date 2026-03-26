@@ -8,4 +8,6 @@
 
 /app/generated/prisma
 
+.vscode
+
 # *.pen

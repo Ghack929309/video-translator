@@ -40,6 +40,7 @@ export type TranslationMinAggregateOutputType = {
   id: string | null
   videoId: string | null
   targetLanguage: string | null
+  ttsEngine: $Enums.TtsEngine | null
   status: $Enums.TranslationStatus | null
   currentStep: $Enums.PipelineStep | null
   progress: number | null
@@ -60,6 +61,7 @@ export type TranslationMaxAggregateOutputType = {
   id: string | null
   videoId: string | null
   targetLanguage: string | null
+  ttsEngine: $Enums.TtsEngine | null
   status: $Enums.TranslationStatus | null
   currentStep: $Enums.PipelineStep | null
   progress: number | null
@@ -80,6 +82,7 @@ export type TranslationCountAggregateOutputType = {
   id: number
   videoId: number
   targetLanguage: number
+  ttsEngine: number
   status: number
   currentStep: number
   progress: number
@@ -115,6 +118,7 @@ export type TranslationMinAggregateInputType = {
   id?: true
   videoId?: true
   targetLanguage?: true
+  ttsEngine?: true
   status?: true
   currentStep?: true
   progress?: true
@@ -135,6 +139,7 @@ export type TranslationMaxAggregateInputType = {
   id?: true
   videoId?: true
   targetLanguage?: true
+  ttsEngine?: true
   status?: true
   currentStep?: true
   progress?: true
@@ -155,6 +160,7 @@ export type TranslationCountAggregateInputType = {
   id?: true
   videoId?: true
   targetLanguage?: true
+  ttsEngine?: true
   status?: true
   currentStep?: true
   progress?: true
@@ -265,6 +271,7 @@ export type TranslationGroupByOutputType = {
   id: string
   videoId: string
   targetLanguage: string
+  ttsEngine: $Enums.TtsEngine
   status: $Enums.TranslationStatus
   currentStep: $Enums.PipelineStep | null
   progress: number
@@ -311,6 +318,7 @@ export type TranslationWhereInput = {
   id?: Prisma.StringFilter<"Translation"> | string
   videoId?: Prisma.StringFilter<"Translation"> | string
   targetLanguage?: Prisma.StringFilter<"Translation"> | string
+  ttsEngine?: Prisma.EnumTtsEngineFilter<"Translation"> | $Enums.TtsEngine
   status?: Prisma.EnumTranslationStatusFilter<"Translation"> | $Enums.TranslationStatus
   currentStep?: Prisma.EnumPipelineStepNullableFilter<"Translation"> | $Enums.PipelineStep | null
   progress?: Prisma.IntFilter<"Translation"> | number
@@ -335,6 +343,7 @@ export type TranslationOrderByWithRelationInput = {
   id?: Prisma.SortOrder
   videoId?: Prisma.SortOrder
   targetLanguage?: Prisma.SortOrder
+  ttsEngine?: Prisma.SortOrder
   status?: Prisma.SortOrder
   currentStep?: Prisma.SortOrderInput | Prisma.SortOrder
   progress?: Prisma.SortOrder
@@ -362,6 +371,7 @@ export type TranslationWhereUniqueInput = Prisma.AtLeast<{
   NOT?: Prisma.TranslationWhereInput | Prisma.TranslationWhereInput[]
   videoId?: Prisma.StringFilter<"Translation"> | string
   targetLanguage?: Prisma.StringFilter<"Translation"> | string
+  ttsEngine?: Prisma.EnumTtsEngineFilter<"Translation"> | $Enums.TtsEngine
   status?: Prisma.EnumTranslationStatusFilter<"Translation"> | $Enums.TranslationStatus
   currentStep?: Prisma.EnumPipelineStepNullableFilter<"Translation"> | $Enums.PipelineStep | null
   progress?: Prisma.IntFilter<"Translation"> | number
@@ -386,6 +396,7 @@ export type TranslationOrderByWithAggregationInput = {
   id?: Prisma.SortOrder
   videoId?: Prisma.SortOrder
   targetLanguage?: Prisma.SortOrder
+  ttsEngine?: Prisma.SortOrder
   status?: Prisma.SortOrder
   currentStep?: Prisma.SortOrderInput | Prisma.SortOrder
   progress?: Prisma.SortOrder
@@ -417,6 +428,7 @@ export type TranslationScalarWhereWithAggregatesInput = {
   id?: Prisma.StringWithAggregatesFilter<"Translation"> | string
   videoId?: Prisma.StringWithAggregatesFilter<"Translation"> | string
   targetLanguage?: Prisma.StringWithAggregatesFilter<"Translation"> | string
+  ttsEngine?: Prisma.EnumTtsEngineWithAggregatesFilter<"Translation"> | $Enums.TtsEngine
   status?: Prisma.EnumTranslationStatusWithAggregatesFilter<"Translation"> | $Enums.TranslationStatus
   currentStep?: Prisma.EnumPipelineStepNullableWithAggregatesFilter<"Translation"> | $Enums.PipelineStep | null
   progress?: Prisma.IntWithAggregatesFilter<"Translation"> | number
@@ -439,6 +451,7 @@ export type TranslationScalarWhereWithAggregatesInput = {
 export type TranslationCreateInput = {
   id?: string
   targetLanguage: string
+  ttsEngine?: $Enums.TtsEngine
   status?: $Enums.TranslationStatus
   currentStep?: $Enums.PipelineStep | null
   progress?: number
@@ -463,6 +476,7 @@ export type TranslationUncheckedCreateInput = {
   id?: string
   videoId: string
   targetLanguage: string
+  ttsEngine?: $Enums.TtsEngine
   status?: $Enums.TranslationStatus
   currentStep?: $Enums.PipelineStep | null
   progress?: number
@@ -485,6 +499,7 @@ export type TranslationUncheckedCreateInput = {
 export type TranslationUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   targetLanguage?: Prisma.StringFieldUpdateOperationsInput | string
+  ttsEngine?: Prisma.EnumTtsEngineFieldUpdateOperationsInput | $Enums.TtsEngine
   status?: Prisma.EnumTranslationStatusFieldUpdateOperationsInput | $Enums.TranslationStatus
   currentStep?: Prisma.NullableEnumPipelineStepFieldUpdateOperationsInput | $Enums.PipelineStep | null
   progress?: Prisma.IntFieldUpdateOperationsInput | number
@@ -509,6 +524,7 @@ export type TranslationUncheckedUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   videoId?: Prisma.StringFieldUpdateOperationsInput | string
   targetLanguage?: Prisma.StringFieldUpdateOperationsInput | string
+  ttsEngine?: Prisma.EnumTtsEngineFieldUpdateOperationsInput | $Enums.TtsEngine
   status?: Prisma.EnumTranslationStatusFieldUpdateOperationsInput | $Enums.TranslationStatus
   currentStep?: Prisma.NullableEnumPipelineStepFieldUpdateOperationsInput | $Enums.PipelineStep | null
   progress?: Prisma.IntFieldUpdateOperationsInput | number
@@ -532,6 +548,7 @@ export type TranslationCreateManyInput = {
   id?: string
   videoId: string
   targetLanguage: string
+  ttsEngine?: $Enums.TtsEngine
   status?: $Enums.TranslationStatus
   currentStep?: $Enums.PipelineStep | null
   progress?: number
@@ -554,6 +571,7 @@ export type TranslationCreateManyInput = {
 export type TranslationUpdateManyMutationInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   targetLanguage?: Prisma.StringFieldUpdateOperationsInput | string
+  ttsEngine?: Prisma.EnumTtsEngineFieldUpdateOperationsInput | $Enums.TtsEngine
   status?: Prisma.EnumTranslationStatusFieldUpdateOperationsInput | $Enums.TranslationStatus
   currentStep?: Prisma.NullableEnumPipelineStepFieldUpdateOperationsInput | $Enums.PipelineStep | null
   progress?: Prisma.IntFieldUpdateOperationsInput | number
@@ -577,6 +595,7 @@ export type TranslationUncheckedUpdateManyInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   videoId?: Prisma.StringFieldUpdateOperationsInput | string
   targetLanguage?: Prisma.StringFieldUpdateOperationsInput | string
+  ttsEngine?: Prisma.EnumTtsEngineFieldUpdateOperationsInput | $Enums.TtsEngine
   status?: Prisma.EnumTranslationStatusFieldUpdateOperationsInput | $Enums.TranslationStatus
   currentStep?: Prisma.NullableEnumPipelineStepFieldUpdateOperationsInput | $Enums.PipelineStep | null
   progress?: Prisma.IntFieldUpdateOperationsInput | number
@@ -610,6 +629,7 @@ export type TranslationCountOrderByAggregateInput = {
   id?: Prisma.SortOrder
   videoId?: Prisma.SortOrder
   targetLanguage?: Prisma.SortOrder
+  ttsEngine?: Prisma.SortOrder
   status?: Prisma.SortOrder
   currentStep?: Prisma.SortOrder
   progress?: Prisma.SortOrder
@@ -638,6 +658,7 @@ export type TranslationMaxOrderByAggregateInput = {
   id?: Prisma.SortOrder
   videoId?: Prisma.SortOrder
   targetLanguage?: Prisma.SortOrder
+  ttsEngine?: Prisma.SortOrder
   status?: Prisma.SortOrder
   currentStep?: Prisma.SortOrder
   progress?: Prisma.SortOrder
@@ -658,6 +679,7 @@ export type TranslationMinOrderByAggregateInput = {
   id?: Prisma.SortOrder
   videoId?: Prisma.SortOrder
   targetLanguage?: Prisma.SortOrder
+  ttsEngine?: Prisma.SortOrder
   status?: Prisma.SortOrder
   currentStep?: Prisma.SortOrder
   progress?: Prisma.SortOrder
@@ -721,6 +743,10 @@ export type TranslationUncheckedUpdateManyWithoutVideoNestedInput = {
   deleteMany?: Prisma.TranslationScalarWhereInput | Prisma.TranslationScalarWhereInput[]
 }
 
+export type EnumTtsEngineFieldUpdateOperationsInput = {
+  set?: $Enums.TtsEngine
+}
+
 export type EnumTranslationStatusFieldUpdateOperationsInput = {
   set?: $Enums.TranslationStatus
 }
@@ -744,6 +770,7 @@ export type NullableDateTimeFieldUpdateOperationsInput = {
 export type TranslationCreateWithoutVideoInput = {
   id?: string
   targetLanguage: string
+  ttsEngine?: $Enums.TtsEngine
   status?: $Enums.TranslationStatus
   currentStep?: $Enums.PipelineStep | null
   progress?: number
@@ -766,6 +793,7 @@ export type TranslationCreateWithoutVideoInput = {
 export type TranslationUncheckedCreateWithoutVideoInput = {
   id?: string
   targetLanguage: string
+  ttsEngine?: $Enums.TtsEngine
   status?: $Enums.TranslationStatus
   currentStep?: $Enums.PipelineStep | null
   progress?: number
@@ -818,6 +846,7 @@ export type TranslationScalarWhereInput = {
   id?: Prisma.StringFilter<"Translation"> | string
   videoId?: Prisma.StringFilter<"Translation"> | string
   targetLanguage?: Prisma.StringFilter<"Translation"> | string
+  ttsEngine?: Prisma.EnumTtsEngineFilter<"Translation"> | $Enums.TtsEngine
   status?: Prisma.EnumTranslationStatusFilter<"Translation"> | $Enums.TranslationStatus
   currentStep?: Prisma.EnumPipelineStepNullableFilter<"Translation"> | $Enums.PipelineStep | null
   progress?: Prisma.IntFilter<"Translation"> | number
@@ -840,6 +869,7 @@ export type TranslationScalarWhereInput = {
 export type TranslationCreateManyVideoInput = {
   id?: string
   targetLanguage: string
+  ttsEngine?: $Enums.TtsEngine
   status?: $Enums.TranslationStatus
   currentStep?: $Enums.PipelineStep | null
   progress?: number
@@ -862,6 +892,7 @@ export type TranslationCreateManyVideoInput = {
 export type TranslationUpdateWithoutVideoInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   targetLanguage?: Prisma.StringFieldUpdateOperationsInput | string
+  ttsEngine?: Prisma.EnumTtsEngineFieldUpdateOperationsInput | $Enums.TtsEngine
   status?: Prisma.EnumTranslationStatusFieldUpdateOperationsInput | $Enums.TranslationStatus
   currentStep?: Prisma.NullableEnumPipelineStepFieldUpdateOperationsInput | $Enums.PipelineStep | null
   progress?: Prisma.IntFieldUpdateOperationsInput | number
@@ -884,6 +915,7 @@ export type TranslationUpdateWithoutVideoInput = {
 export type TranslationUncheckedUpdateWithoutVideoInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   targetLanguage?: Prisma.StringFieldUpdateOperationsInput | string
+  ttsEngine?: Prisma.EnumTtsEngineFieldUpdateOperationsInput | $Enums.TtsEngine
   status?: Prisma.EnumTranslationStatusFieldUpdateOperationsInput | $Enums.TranslationStatus
   currentStep?: Prisma.NullableEnumPipelineStepFieldUpdateOperationsInput | $Enums.PipelineStep | null
   progress?: Prisma.IntFieldUpdateOperationsInput | number
@@ -906,6 +938,7 @@ export type TranslationUncheckedUpdateWithoutVideoInput = {
 export type TranslationUncheckedUpdateManyWithoutVideoInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   targetLanguage?: Prisma.StringFieldUpdateOperationsInput | string
+  ttsEngine?: Prisma.EnumTtsEngineFieldUpdateOperationsInput | $Enums.TtsEngine
   status?: Prisma.EnumTranslationStatusFieldUpdateOperationsInput | $Enums.TranslationStatus
   currentStep?: Prisma.NullableEnumPipelineStepFieldUpdateOperationsInput | $Enums.PipelineStep | null
   progress?: Prisma.IntFieldUpdateOperationsInput | number
@@ -931,6 +964,7 @@ export type TranslationSelect<ExtArgs extends runtime.Types.Extensions.InternalA
   id?: boolean
   videoId?: boolean
   targetLanguage?: boolean
+  ttsEngine?: boolean
   status?: boolean
   currentStep?: boolean
   progress?: boolean
@@ -955,6 +989,7 @@ export type TranslationSelectCreateManyAndReturn<ExtArgs extends runtime.Types.E
   id?: boolean
   videoId?: boolean
   targetLanguage?: boolean
+  ttsEngine?: boolean
   status?: boolean
   currentStep?: boolean
   progress?: boolean
@@ -979,6 +1014,7 @@ export type TranslationSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.E
   id?: boolean
   videoId?: boolean
   targetLanguage?: boolean
+  ttsEngine?: boolean
   status?: boolean
   currentStep?: boolean
   progress?: boolean
@@ -1003,6 +1039,7 @@ export type TranslationSelectScalar = {
   id?: boolean
   videoId?: boolean
   targetLanguage?: boolean
+  ttsEngine?: boolean
   status?: boolean
   currentStep?: boolean
   progress?: boolean
@@ -1022,7 +1059,7 @@ export type TranslationSelectScalar = {
   updatedAt?: boolean
 }
 
-export type TranslationOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "videoId" | "targetLanguage" | "status" | "currentStep" | "progress" | "extractedAudioKey" | "transcriptJson" | "translatedJson" | "synthesizedAudioKey" | "resultVideoKey" | "fishAudioVoiceId" | "fishAudioVoiceMap" | "errorMessage" | "errorStep" | "retryCount" | "startedAt" | "completedAt" | "createdAt" | "updatedAt", ExtArgs["result"]["translation"]>
+export type TranslationOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "videoId" | "targetLanguage" | "ttsEngine" | "status" | "currentStep" | "progress" | "extractedAudioKey" | "transcriptJson" | "translatedJson" | "synthesizedAudioKey" | "resultVideoKey" | "fishAudioVoiceId" | "fishAudioVoiceMap" | "errorMessage" | "errorStep" | "retryCount" | "startedAt" | "completedAt" | "createdAt" | "updatedAt", ExtArgs["result"]["translation"]>
 export type TranslationInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   video?: boolean | Prisma.VideoDefaultArgs<ExtArgs>
 }
@@ -1042,6 +1079,7 @@ export type $TranslationPayload<ExtArgs extends runtime.Types.Extensions.Interna
     id: string
     videoId: string
     targetLanguage: string
+    ttsEngine: $Enums.TtsEngine
     status: $Enums.TranslationStatus
     currentStep: $Enums.PipelineStep | null
     progress: number
@@ -1486,6 +1524,7 @@ export interface TranslationFieldRefs {
   readonly id: Prisma.FieldRef<"Translation", 'String'>
   readonly videoId: Prisma.FieldRef<"Translation", 'String'>
   readonly targetLanguage: Prisma.FieldRef<"Translation", 'String'>
+  readonly ttsEngine: Prisma.FieldRef<"Translation", 'TtsEngine'>
   readonly status: Prisma.FieldRef<"Translation", 'TranslationStatus'>
   readonly currentStep: Prisma.FieldRef<"Translation", 'PipelineStep'>
   readonly progress: Prisma.FieldRef<"Translation", 'Int'>

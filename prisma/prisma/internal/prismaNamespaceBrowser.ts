@@ -105,6 +105,7 @@ export const TranslationScalarFieldEnum = {
   id: 'id',
   videoId: 'videoId',
   targetLanguage: 'targetLanguage',
+  ttsEngine: 'ttsEngine',
   status: 'status',
   currentStep: 'currentStep',
   progress: 'progress',
