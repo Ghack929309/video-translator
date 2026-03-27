@@ -49,3 +49,11 @@ export const PipelineStep = {
 } as const
 
 export type PipelineStep = (typeof PipelineStep)[keyof typeof PipelineStep]
+
+
+export const TtsEngine = {
+  FISH_AUDIO: 'FISH_AUDIO',
+  COSYVOICE: 'COSYVOICE'
+} as const
+
+export type TtsEngine = (typeof TtsEngine)[keyof typeof TtsEngine]

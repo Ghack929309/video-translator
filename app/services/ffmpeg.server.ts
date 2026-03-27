@@ -165,6 +165,104 @@ export const ffmpeg = {
   },
 
   /**
+   * Time-stretch audio to EXACTLY the target duration.
+   * Clamps the stretch ratio to avoid extreme distortion, then truncates
+   * or pads the result so the output is precisely targetDurationSec long.
+   * Returns the actual stretch ratio used (for diagnostics).
+   */
+  async timeStretchExact(
+    audioPath: string,
+    targetDurationSec: number,
+    outputPath: string,
+  ): Promise<{ outputPath: string; stretchRatio: number }> {
+    const currentDuration = await this.getDuration(audioPath);
+    if (currentDuration <= 0) {
+      throw new Error("Cannot determine audio duration for timeStretchExact");
+    }
+
+    const rawRatio = currentDuration / targetDurationSec;
+
+    // Clamp: don't speed up beyond 2.5x or slow down beyond 0.4x
+    // Beyond these limits, audio quality degrades severely
+    const MAX_RATIO = 2.5;
+    const MIN_RATIO = 0.4;
+    const clampedRatio = Math.max(MIN_RATIO, Math.min(MAX_RATIO, rawRatio));
+
+    if (rawRatio !== clampedRatio) {
+      console.warn(
+        `[ffmpeg] timeStretchExact: ratio ${rawRatio.toFixed(2)} clamped to ${clampedRatio.toFixed(2)} ` +
+          `(${currentDuration.toFixed(2)}s → ${targetDurationSec.toFixed(2)}s target)`,
+      );
+    }
+
+    // Build atempo chain for the clamped ratio
+    const filters: string[] = [];
+    let remaining = clampedRatio;
+    while (remaining > 2.0) {
+      filters.push("atempo=2.0");
+      remaining /= 2.0;
+    }
+    while (remaining < 0.5) {
+      filters.push("atempo=0.5");
+      remaining /= 0.5;
+    }
+    filters.push(`atempo=${remaining.toFixed(4)}`);
+
+    // Step 1: stretch audio
+    const stretchedTmp = outputPath + ".stretched.wav";
+    await new Promise<void>((resolve, reject) => {
+      Ffmpeg(audioPath)
+        .audioFilters(filters)
+        .audioChannels(1)
+        .audioFrequency(44100)
+        .format("wav")
+        .on("error", (err) =>
+          reject(new Error(`FFmpeg stretch failed: ${err.message}`)),
+        )
+        .on("end", () => resolve())
+        .save(stretchedTmp);
+    });
+
+    // Step 2: verify actual duration and truncate or pad to exact target
+    const actualDuration = await this.getDuration(stretchedTmp);
+    const drift = Math.abs(actualDuration - targetDurationSec);
+
+    if (drift < 0.02) {
+      // Close enough (<20ms drift), just rename
+      fs.renameSync(stretchedTmp, outputPath);
+    } else if (actualDuration > targetDurationSec) {
+      // Truncate with a short fade-out at the end to avoid clicks
+      const fadeStart = Math.max(0, targetDurationSec - 0.05);
+      await new Promise<void>((resolve, reject) => {
+        Ffmpeg(stretchedTmp)
+          .duration(targetDurationSec)
+          .audioFilters(`afade=t=out:st=${fadeStart.toFixed(3)}:d=0.05`)
+          .audioChannels(1)
+          .audioFrequency(44100)
+          .format("wav")
+          .on("error", (err) =>
+            reject(new Error(`FFmpeg truncate failed: ${err.message}`)),
+          )
+          .on("end", () => {
+            if (fs.existsSync(stretchedTmp)) fs.unlinkSync(stretchedTmp);
+            resolve();
+          })
+          .save(outputPath);
+      });
+    } else {
+      // Pad with silence to reach exact target
+      const padDuration = targetDurationSec - actualDuration;
+      const padPath = outputPath + ".pad.wav";
+      await this.generateSilence(padDuration, padPath);
+      await this.concatenateAudio([stretchedTmp, padPath], outputPath);
+      if (fs.existsSync(stretchedTmp)) fs.unlinkSync(stretchedTmp);
+      if (fs.existsSync(padPath)) fs.unlinkSync(padPath);
+    }
+
+    return { outputPath, stretchRatio: clampedRatio };
+  },
+
+  /**
    * Get the duration of a media file in seconds.
    */
   getDuration(filePath: string): Promise<number> {
@@ -176,6 +274,34 @@ export const ffmpeg = {
         }
         resolve(metadata.format.duration ?? 0);
       });
+    });
+  },
+
+  /**
+   * Extract a time range from an audio file.
+   * Used to isolate per-speaker audio segments for voice cloning.
+   */
+  async extractTimeRange(
+    inputPath: string,
+    startSec: number,
+    endSec: number,
+    outputPath: string,
+  ): Promise<string> {
+    const duration = endSec - startSec;
+    if (duration <= 0) throw new Error("Invalid time range for extraction");
+
+    return new Promise((resolve, reject) => {
+      Ffmpeg(inputPath)
+        .setStartTime(startSec)
+        .duration(duration)
+        .audioChannels(1)
+        .audioFrequency(44100)
+        .format("wav")
+        .on("error", (err) =>
+          reject(new Error(`FFmpeg extractTimeRange failed: ${err.message}`)),
+        )
+        .on("end", () => resolve(outputPath))
+        .save(outputPath);
     });
   },
 

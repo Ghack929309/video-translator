@@ -38,6 +38,7 @@ model Translation {
   videoId             String
   video               Video             @relation(fields: [videoId], references: [id], onDelete: Cascade)
   targetLanguage      String
+  ttsEngine           TtsEngine         @default(FISH_AUDIO)
   status              TranslationStatus @default(PENDING)
   currentStep         PipelineStep?
   progress            Int               @default(0)
@@ -47,6 +48,7 @@ model Translation {
   synthesizedAudioKey String?
   resultVideoKey      String?
   fishAudioVoiceId    String?
+  fishAudioVoiceMap   Json?
   errorMessage        String?
   errorStep           PipelineStep?
   retryCount          Int               @default(0)
@@ -84,4 +86,9 @@ enum PipelineStep {
   CLONE_VOICE
   SYNTHESIZE
   MERGE
+}
+
+enum TtsEngine {
+  FISH_AUDIO
+  COSYVOICE
 }

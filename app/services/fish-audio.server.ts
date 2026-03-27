@@ -95,6 +95,7 @@ export const fishAudio = {
     text: string,
     referenceId: string,
     targetLanguage?: string,
+    prosodySpeed?: number,
   ): Promise<Buffer> {
     // Wrap text with a native-speaker language hint to reduce accent bleeding
     const langHint = targetLanguage
@@ -102,27 +103,88 @@ export const fishAudio = {
       : "";
     const instructedText = langHint ? `${langHint}\n${text}` : text;
 
-    const res = await fetch(`${BASE_URL}/v1/tts`, {
-      method: "POST",
-      headers: {
-        ...headers("application/json"),
-        model: "s2-pro",
-      },
-      body: JSON.stringify({
-        text: instructedText,
-        reference_id: referenceId,
-        format: "wav",
-        latency: "normal",
-      }),
-    });
-
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`Fish Audio TTS failed (${res.status}): ${errText}`);
+    // Reject empty/whitespace-only text early — Fish Audio returns 0 bytes for these
+    if (!text || text.trim().length === 0) {
+      throw new Error("Cannot synthesize empty text");
     }
 
-    const arrayBuffer = await res.arrayBuffer();
-    return Buffer.from(arrayBuffer);
+    // Only include prosody when speed differs meaningfully from 1.0
+    const speed = prosodySpeed
+      ? Math.max(0.5, Math.min(2.0, prosodySpeed))
+      : undefined;
+    const needsProsody = speed !== undefined && Math.abs(speed - 1.0) > 0.05;
+
+    const requestBody: Record<string, unknown> = {
+      text: instructedText,
+      reference_id: referenceId,
+      format: "wav",
+      latency: "normal",
+    };
+    if (needsProsody) {
+      requestBody.prosody = { speed };
+    }
+
+    const MAX_RETRIES = 2;
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        // Exponential backoff: 1s, 2s
+        const delay = attempt * 1000;
+        console.log(
+          `[fish-audio] Retry ${attempt}/${MAX_RETRIES} after ${delay}ms...`,
+        );
+        await new Promise((r) => setTimeout(r, delay));
+      }
+
+      try {
+        const res = await fetch(`${BASE_URL}/v1/tts`, {
+          method: "POST",
+          headers: {
+            ...headers("application/json"),
+            model: "s2-pro",
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Fish Audio TTS failed (${res.status}): ${errText}`);
+        }
+
+        const arrayBuffer = await res.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+
+        // Validate the response is actually a WAV file:
+        // WAV files start with "RIFF" header and must have reasonable size
+        if (buffer.length < 44) {
+          const ct = res.headers.get("content-type") ?? "unknown";
+          const rl = res.headers.get("retry-after") ?? "none";
+          throw new Error(
+            `Fish Audio returned too-small response (${buffer.length} bytes, ` +
+              `content-type: ${ct}, retry-after: ${rl}, text: "${text.slice(0, 60)}")`,
+          );
+        }
+
+        const header = buffer.subarray(0, 4).toString("ascii");
+        if (header !== "RIFF") {
+          // Log what we got instead (likely an error message)
+          const preview = buffer.subarray(0, 200).toString("utf-8");
+          throw new Error(
+            `Fish Audio returned invalid audio (header: "${header}"): ${preview}`,
+          );
+        }
+
+        return buffer;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        console.warn(
+          `[fish-audio] TTS attempt ${attempt + 1} failed: ${lastError.message}`,
+        );
+      }
+    }
+
+    throw lastError ?? new Error("Fish Audio TTS failed after retries");
   },
 
   /**

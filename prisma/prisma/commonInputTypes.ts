@@ -171,6 +171,13 @@ export type IntNullableWithAggregatesFilter<$PrismaModel = never> = {
   _max?: Prisma.NestedIntNullableFilter<$PrismaModel>
 }
 
+export type EnumTtsEngineFilter<$PrismaModel = never> = {
+  equals?: $Enums.TtsEngine | Prisma.EnumTtsEngineFieldRefInput<$PrismaModel>
+  in?: $Enums.TtsEngine[] | Prisma.ListEnumTtsEngineFieldRefInput<$PrismaModel>
+  notIn?: $Enums.TtsEngine[] | Prisma.ListEnumTtsEngineFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumTtsEngineFilter<$PrismaModel> | $Enums.TtsEngine
+}
+
 export type EnumTranslationStatusFilter<$PrismaModel = never> = {
   equals?: $Enums.TranslationStatus | Prisma.EnumTranslationStatusFieldRefInput<$PrismaModel>
   in?: $Enums.TranslationStatus[] | Prisma.ListEnumTranslationStatusFieldRefInput<$PrismaModel>
@@ -229,6 +236,16 @@ export type DateTimeNullableFilter<$PrismaModel = never> = {
   gt?: Date | string | Prisma.DateTimeFieldRefInput<$PrismaModel>
   gte?: Date | string | Prisma.DateTimeFieldRefInput<$PrismaModel>
   not?: Prisma.NestedDateTimeNullableFilter<$PrismaModel> | Date | string | null
+}
+
+export type EnumTtsEngineWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.TtsEngine | Prisma.EnumTtsEngineFieldRefInput<$PrismaModel>
+  in?: $Enums.TtsEngine[] | Prisma.ListEnumTtsEngineFieldRefInput<$PrismaModel>
+  notIn?: $Enums.TtsEngine[] | Prisma.ListEnumTtsEngineFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumTtsEngineWithAggregatesFilter<$PrismaModel> | $Enums.TtsEngine
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumTtsEngineFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumTtsEngineFilter<$PrismaModel>
 }
 
 export type EnumTranslationStatusWithAggregatesFilter<$PrismaModel = never> = {
@@ -478,6 +495,13 @@ export type NestedFloatNullableFilter<$PrismaModel = never> = {
   not?: Prisma.NestedFloatNullableFilter<$PrismaModel> | number | null
 }
 
+export type NestedEnumTtsEngineFilter<$PrismaModel = never> = {
+  equals?: $Enums.TtsEngine | Prisma.EnumTtsEngineFieldRefInput<$PrismaModel>
+  in?: $Enums.TtsEngine[] | Prisma.ListEnumTtsEngineFieldRefInput<$PrismaModel>
+  notIn?: $Enums.TtsEngine[] | Prisma.ListEnumTtsEngineFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumTtsEngineFilter<$PrismaModel> | $Enums.TtsEngine
+}
+
 export type NestedEnumTranslationStatusFilter<$PrismaModel = never> = {
   equals?: $Enums.TranslationStatus | Prisma.EnumTranslationStatusFieldRefInput<$PrismaModel>
   in?: $Enums.TranslationStatus[] | Prisma.ListEnumTranslationStatusFieldRefInput<$PrismaModel>
@@ -501,6 +525,16 @@ export type NestedDateTimeNullableFilter<$PrismaModel = never> = {
   gt?: Date | string | Prisma.DateTimeFieldRefInput<$PrismaModel>
   gte?: Date | string | Prisma.DateTimeFieldRefInput<$PrismaModel>
   not?: Prisma.NestedDateTimeNullableFilter<$PrismaModel> | Date | string | null
+}
+
+export type NestedEnumTtsEngineWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.TtsEngine | Prisma.EnumTtsEngineFieldRefInput<$PrismaModel>
+  in?: $Enums.TtsEngine[] | Prisma.ListEnumTtsEngineFieldRefInput<$PrismaModel>
+  notIn?: $Enums.TtsEngine[] | Prisma.ListEnumTtsEngineFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumTtsEngineWithAggregatesFilter<$PrismaModel> | $Enums.TtsEngine
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumTtsEngineFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumTtsEngineFilter<$PrismaModel>
 }
 
 export type NestedEnumTranslationStatusWithAggregatesFilter<$PrismaModel = never> = {

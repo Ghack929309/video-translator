@@ -6,6 +6,9 @@
     "build": "react-router build",
     "dev": "react-router dev",
     "dev:worker": "npx tsx --env-file=.env worker.ts",
+    "cosyvoice:build": "docker build -t cosyvoice-api ./services/cosyvoice-api",
+    "cosyvoice:start": "docker run --rm --gpus all -p 50000:50000 cosyvoice-api",
+    "dev:all": "concurrently \"npm run dev\" \"npm run dev:worker\" \"npm run cosyvoice:start\"",
     "start": "react-router-serve ./build/server/index.js",
     "typecheck": "react-router typegen && tsc"
   },
@@ -49,6 +52,7 @@
     "@types/node": "^22",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
+    "concurrently": "^9.2.1",
     "dotenv": "^17.3.1",
     "tailwindcss": "^4.2.1",
     "typescript": "^5.9.3",

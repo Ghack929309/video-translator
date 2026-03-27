@@ -15,7 +15,7 @@ let running = true;
 
 // Visibility timeout in seconds — how long a message is hidden from other
 // consumers while being processed. Set high enough for the pipeline to finish.
-const VISIBILITY_TIMEOUT = 600; // 10 minutes
+const VISIBILITY_TIMEOUT = 3900; // 65 minutes (must exceed JOB_TIMEOUT_MS)
 
 async function main() {
   console.log("[worker] Starting...");
@@ -55,9 +55,18 @@ async function main() {
         ]);
         console.log(`[worker] Archived msg ${msgId}`);
       } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
         console.error(`[worker] Pipeline failed for msg ${msgId}:`, err);
-        // Message becomes visible again after VISIBILITY_TIMEOUT expires,
-        // allowing automatic retry. Delete if you want to dead-letter instead.
+
+        // Archive stale messages that reference deleted records
+        if (errMsg.includes("P2025") || errMsg.includes("not found")) {
+          await client.query("SELECT pgmq.archive($1, $2::bigint)", [
+            QUEUE_NAME,
+            msgId,
+          ]);
+          console.log(`[worker] Archived stale msg ${msgId} (record deleted)`);
+        }
+        // Otherwise message becomes visible again after VISIBILITY_TIMEOUT
       }
     } catch (err) {
       if (!running) break;

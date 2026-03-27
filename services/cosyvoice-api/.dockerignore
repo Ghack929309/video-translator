@@ -1,0 +1,11 @@
+__pycache__
+*.pyc
+*.pyo
+.git
+.venv
+test_*.py
+*.pcm
+README.md
+.dockerignore
+cosyvoice-repo
+pretrained_models
