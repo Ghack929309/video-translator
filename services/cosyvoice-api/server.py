@@ -10,9 +10,13 @@ from fastapi.responses import StreamingResponse, JSONResponse
 import torch
 import torchaudio
 
-# Add CosyVoice to sys.path exactly as requested
-sys.path.append("/workspace/CosyVoice")
-sys.path.append("/workspace/CosyVoice/third_party/Matcha-TTS")
+# ── Dynamic Path Resolution (Works in Docker and Locally) ────────────────
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+COSYVOICE_REPO_DIR = os.path.join(BASE_DIR, "CosyVoice")
+
+# If the Docker path doesn't exist, assume we are running locally where the repo was cloned
+sys.path.append("/workspace/CosyVoice" if os.path.exists("/workspace/CosyVoice") else COSYVOICE_REPO_DIR)
+sys.path.append("/workspace/CosyVoice/third_party/Matcha-TTS" if os.path.exists("/workspace/CosyVoice") else os.path.join(COSYVOICE_REPO_DIR, "third_party", "Matcha-TTS"))
 
 from cosyvoice.cli.cosyvoice import AutoModel
 
@@ -20,7 +24,8 @@ app = FastAPI(title="CosyVoice 3 API Service")
 
 # ── Model Loading (Singleton) ─────────────────────────────────────────────
 
-MODEL_DIR = os.environ.get("MODEL_DIR", "/workspace/pretrained_models/Fun-CosyVoice3-0.5B")
+DEFAULT_MODEL_DIR = "/workspace/pretrained_models/Fun-CosyVoice3-0.5B" if os.path.exists("/workspace") else os.path.join(BASE_DIR, "pretrained_models", "Fun-CosyVoice3-0.5B")
+MODEL_DIR = os.environ.get("MODEL_DIR", DEFAULT_MODEL_DIR)
 print(f"[Starting up] Loading CosyVoice 3 model from {MODEL_DIR}...")
 
 try:

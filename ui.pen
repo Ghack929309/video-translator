@@ -236,7 +236,8 @@
               "lineHeight": 1.5,
               "textAlign": "center",
               "fontFamily": "Inter",
-              "fontSize": 18
+              "fontSize": 18,
+              "fontWeight": "normal"
             },
             {
               "type": "frame",
@@ -279,7 +280,8 @@
               "fill": "$text-muted",
               "content": "Works with YouTube, Zoom, Loom, Vimeo, TikTok and MP4 uploads",
               "fontFamily": "Inter",
-              "fontSize": 13
+              "fontSize": 13,
+              "fontWeight": "normal"
             },
             {
               "type": "frame",
@@ -1851,7 +1853,8 @@
               "fill": "$text-muted",
               "content": "Sign in to your account",
               "fontFamily": "Inter",
-              "fontSize": 14
+              "fontSize": 14,
+              "fontWeight": "normal"
             },
             {
               "type": "frame",
@@ -1960,7 +1963,8 @@
                   "fill": "$text-muted",
                   "content": "or continue with email",
                   "fontFamily": "Inter",
-                  "fontSize": 12
+                  "fontSize": 12,
+                  "fontWeight": "normal"
                 },
                 {
                   "type": "frame",
@@ -2015,7 +2019,8 @@
                       "fill": "$text-muted",
                       "content": "you@example.com",
                       "fontFamily": "Inter",
-                      "fontSize": 14
+                      "fontSize": 14,
+                      "fontWeight": "normal"
                     }
                   ]
                 }
@@ -2064,7 +2069,8 @@
                       "fill": "$text-muted",
                       "content": "••••••••",
                       "fontFamily": "Inter",
-                      "fontSize": 14
+                      "fontSize": 14,
+                      "fontWeight": "normal"
                     }
                   ]
                 },
@@ -2128,7 +2134,8 @@
                   "fill": "$text-muted",
                   "content": "Don't have an account?",
                   "fontFamily": "Inter",
-                  "fontSize": 12
+                  "fontSize": 12,
+                  "fontWeight": "normal"
                 },
                 {
                   "type": "text",
@@ -2239,7 +2246,8 @@
               "fill": "$text-muted",
               "content": "Sign in to your account",
               "fontFamily": "Inter",
-              "fontSize": 14
+              "fontSize": 14,
+              "fontWeight": "normal"
             },
             {
               "type": "frame",
@@ -2348,7 +2356,8 @@
                   "fill": "$text-muted",
                   "content": "or continue with email",
                   "fontFamily": "Inter",
-                  "fontSize": 12
+                  "fontSize": 12,
+                  "fontWeight": "normal"
                 },
                 {
                   "type": "frame",
@@ -2403,7 +2412,8 @@
                       "fill": "$text-muted",
                       "content": "you@example.com",
                       "fontFamily": "Inter",
-                      "fontSize": 14
+                      "fontSize": 14,
+                      "fontWeight": "normal"
                     }
                   ]
                 }
@@ -2452,7 +2462,8 @@
                       "fill": "$text-muted",
                       "content": "••••••••",
                       "fontFamily": "Inter",
-                      "fontSize": 14
+                      "fontSize": 14,
+                      "fontWeight": "normal"
                     }
                   ]
                 },
@@ -2516,7 +2527,8 @@
                   "fill": "$text-muted",
                   "content": "Don't have an account?",
                   "fontFamily": "Inter",
-                  "fontSize": 12
+                  "fontSize": 12,
+                  "fontWeight": "normal"
                 },
                 {
                   "type": "text",
