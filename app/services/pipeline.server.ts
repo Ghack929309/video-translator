@@ -9,6 +9,8 @@ import { assemblyai } from "~/services/assemblyai.server";
 import { openaiService } from "~/services/openai.server";
 import { fishAudio } from "~/services/fish-audio.server";
 import { cosyvoice } from "~/services/cosyvoice.server";
+import { env } from "~/utils/env.server";
+import { runpodApi } from "~/services/runpod-api.server";
 
 type PipelineStep =
   | "DOWNLOAD"
@@ -691,8 +693,14 @@ export const pipeline = {
       progress: 70,
     });
 
-    // Build speaker → voice lookup (engine-specific)
-    let voiceMap: Record<string, string>;
+    if (isCosyVoice && env.RUNPOD_ENDPOINT_ID) {
+      await runpodApi.scaleMinWorkers(env.RUNPOD_ENDPOINT_ID, 1);
+      await runpodApi.waitForWorkerReady(env.RUNPOD_ENDPOINT_ID, 180000); // 3 minutes timeout
+    }
+
+    try {
+      // Build speaker → voice lookup (engine-specific)
+      let voiceMap: Record<string, string>;
     let defaultVoiceRef: string;
 
     if (isCosyVoice) {
@@ -870,7 +878,15 @@ export const pipeline = {
       progress: STEP_PROGRESS.SYNTHESIZE,
     });
 
-    console.log(`[pipeline] Step SYNTHESIZE complete — stored at ${audioKey}`);
+      console.log(`[pipeline] Step SYNTHESIZE complete — stored at ${audioKey}`);
+    } finally {
+      if (isCosyVoice && env.RUNPOD_ENDPOINT_ID) {
+        console.log(`[pipeline] Ensuring RunPod endpoint scales down its active core count...`);
+        await runpodApi.scaleMinWorkers(env.RUNPOD_ENDPOINT_ID, 0).catch(err => 
+          console.error(`[pipeline] FAILED to scale down RunPod endpoint!`, err)
+        );
+      }
+    }
   },
 
   /**

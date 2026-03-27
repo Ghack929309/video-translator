@@ -37,6 +37,7 @@ See: .planning/PROJECT.md (updated 2026-03-26)
 
 - Phase 4 added: Implement the CosyVoice 3 API Service
 - Phase 5 added: Implement the CosyVoice 3 API Service (FastAPI Docker version)
+- Phase 6 added: RunPod Auto-Scaler and Worker Status UI
 
 ---
 *Last updated: 2026-03-26 after phase 4 addition*

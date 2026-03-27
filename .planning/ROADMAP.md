@@ -86,6 +86,36 @@ Plans:
 Plans:
 - [ ] TBD (run /gsd-plan-phase 5 to break down)
 
+### Phase 6: RunPod Auto-Scaler and Worker Status UI
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 5
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 6 to break down)
+
+### Phase 7: RunPod Min-Worker Auto-Scaler
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 6
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 7 to break down)
+
+### Phase 8: Migrate Serverless to On-Demand Pod Start Stop
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 7
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 8 to break down)
+
 ---
 
 *Roadmap created: 2026-03-26*
