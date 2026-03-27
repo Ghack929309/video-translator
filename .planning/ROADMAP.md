@@ -66,6 +66,26 @@
 
 **Dependencies:** Phase 1 (schema for ttsEngine field), Phase 2 (pipeline works end-to-end)
 
+### Phase 4: Implement the CosyVoice 3 API Service
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 3
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 4 to break down)
+
+### Phase 5: Implement the CosyVoice 3 API Service
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 4
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 5 to break down)
+
 ---
 
 *Roadmap created: 2026-03-26*
