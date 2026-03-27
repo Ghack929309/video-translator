@@ -33,7 +33,8 @@ RUN python scripts/download_model.py
 
 # 7. Setup runtime
 COPY server.py .
+COPY handler.py .
 ENV PYTHONPATH="/workspace/CosyVoice:/workspace/CosyVoice/third_party/Matcha-TTS"
 
 EXPOSE 50000
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "50000", "--workers", "1"]
+CMD ["python", "-u", "handler.py"]

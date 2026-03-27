@@ -68,10 +68,10 @@ export const cosyvoice = {
     speed?: number,
     promptText?: string,
   ): Promise<Buffer> {
-    // Guard: COSYVOICE_URL must be configured
-    if (!env.COSYVOICE_URL) {
+    // Guard: COSYVOICE_URL and RUNPOD_API_KEY must be configured
+    if (!env.COSYVOICE_URL || !env.RUNPOD_API_KEY) {
       throw new Error(
-        "COSYVOICE_URL is not configured. Set it in your .env file to use CosyVoice TTS engine.",
+        "COSYVOICE_URL and RUNPOD_API_KEY are not configured. Set them in your .env file to use the RunPod Serverless CosyVoice engine.",
       );
     }
 
@@ -84,26 +84,28 @@ export const cosyvoice = {
     const clampedSpeed = Math.max(0.5, Math.min(2.0, speed ?? 1.0));
 
     console.log(
-      `[cosyvoice] Synthesizing (mode: ${mode}, target: ${targetLanguage}, speed: ${clampedSpeed})...`,
+      `[cosyvoice] Synthesizing via RunPod Serverless (mode: ${mode}, target: ${targetLanguage}, speed: ${clampedSpeed})...`,
     );
 
-    // Read reference audio as Blob for FormData
+    // Read reference audio & encode to Base64
     const wavBuffer = fs.readFileSync(promptWavPath);
-    const wavBlob = new Blob([wavBuffer], { type: "audio/wav" });
+    const wavBase64 = wavBuffer.toString("base64");
 
-    // Build multipart/form-data payload
-    const formData = new FormData();
-    formData.append("text", text);
-    formData.append("mode", mode);
-    formData.append("speed", String(clampedSpeed));
-    formData.append("reference_audio", wavBlob, "reference.wav");
+    // Build JSON payload for RunPod Serverless
+    const inputPayload: Record<string, any> = {
+      tts_text: text,
+      mode: mode,
+      speed: clampedSpeed,
+      prompt_wav: wavBase64,
+    };
 
     if (mode === "zero_shot" && promptText) {
-      formData.append(
-        "reference_text",
-        `You are a helpful assistant.<|endofprompt|>${promptText}`,
-      );
-    } 
+      inputPayload.prompt_text = promptText;
+    }
+
+    const runpodPayload = {
+      input: inputPayload,
+    };
 
     // Retry loop with exponential backoff
     let lastError: Error | null = null;
@@ -118,31 +120,44 @@ export const cosyvoice = {
       }
 
       try {
-        // FastAPI /synthesize endpoint
-        const res = await fetch(`${env.COSYVOICE_URL}/synthesize`, {
+        // RunPod /runsync endpoint
+        const res = await fetch(env.COSYVOICE_URL, {
           method: "POST",
-          // Let fetch automatically set the boundary in Content-Type header
-          body: formData,
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${env.RUNPOD_API_KEY}`,
+          },
+          body: JSON.stringify(runpodPayload),
         });
 
         if (!res.ok) {
           const errText = await res.text();
           throw new Error(
-            `CosyVoice inference failed (${res.status}): ${errText}`,
+            `RunPod inference failed (${res.status}): ${errText}`,
           );
         }
 
-        // Response is a direct WAV binary stream
-        const arrayBuffer = await res.arrayBuffer();
-        const outputBuffer = Buffer.from(arrayBuffer);
-
-        // Validate: non-empty response
-        if (outputBuffer.length === 0) {
-          throw new Error("CosyVoice returned empty audio payload");
+        const runpodResult = await res.json();
+        
+        // RunPod specific response structure checks
+        if (runpodResult.status !== "COMPLETED") {
+          throw new Error(`RunPod returned unsuccessful status: ${runpodResult.status}`);
         }
 
+        const output = runpodResult.output;
+        if (!output || output.error) {
+          throw new Error(`RunPod serverless error: ${output?.error ?? "Unknown execution error"}`);
+        }
+
+        const audioBase64 = output.audio;
+        if (!audioBase64) {
+          throw new Error("RunPod returned empty audio payload inside output object");
+        }
+
+        const outputBuffer = Buffer.from(audioBase64, "base64");
+
         console.log(
-          `[cosyvoice] Synthesized audio (${outputBuffer.length} bytes WAV, mode: ${mode})`,
+          `[cosyvoice] Synthesized audio (${outputBuffer.length} bytes WAV, duration: ${output.duration_sec}s)`,
         );
 
         return outputBuffer;
@@ -154,6 +169,6 @@ export const cosyvoice = {
       }
     }
 
-    throw lastError ?? new Error("CosyVoice TTS failed after retries");
+    throw lastError ?? new Error("CosyVoice RunPod TTS failed after retries");
   },
 };

@@ -133,20 +133,26 @@ def handler(job):
             if not all_speech:
                 return {"error": "Model returned no audio"}
 
-            # ── Convert to PCM int16 ────────────────────────────
+            # ── Convert to WAV ──────────────────────────────────
+            import io
             speech_tensor = torch.cat(all_speech, dim=1)  # [1, samples]
-            speech_np = speech_tensor.squeeze(0).cpu().numpy()
-            speech_np = np.clip(speech_np, -1.0, 1.0)
-            pcm_int16 = (speech_np * 32767).astype(np.int16)
+            
+            wav_io = io.BytesIO()
+            torchaudio.save(
+                wav_io,
+                speech_tensor.cpu(),
+                SAMPLE_RATE,
+                format="wav"
+            )
+            wav_bytes = wav_io.getvalue()
 
             # ── Encode + return ─────────────────────────────────
-            pcm_bytes = pcm_int16.tobytes()
-            audio_b64 = base64.b64encode(pcm_bytes).decode("ascii")
-            duration_sec = len(pcm_int16) / SAMPLE_RATE
+            audio_b64 = base64.b64encode(wav_bytes).decode("ascii")
+            duration_sec = speech_tensor.shape[1] / SAMPLE_RATE
 
             print(
                 f"[cosyvoice-api] Synthesized {duration_sec:.2f}s "
-                f"({len(pcm_bytes)} bytes, mode: {mode})"
+                f"({len(wav_bytes)} bytes WAV, mode: {mode})"
             )
 
             return {
