@@ -12,6 +12,13 @@ import { Label } from "~/components/ui/label";
 import { Card, CardContent } from "~/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Separator } from "~/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select";
 import { useState } from "react";
 import { UploadZone } from "~/components/upload-zone";
 import { UrlInput } from "~/components/url-input";
@@ -44,7 +51,7 @@ export async function action({ request }: Route.ActionArgs) {
     return { error: firstError };
   }
 
-  const { sourceType, sourceUrl, storageKey, title, targetLanguage } =
+  const { sourceType, sourceUrl, storageKey, title, targetLanguage, ttsEngine } =
     parsed.data;
 
   // Rate limit: max 5 concurrent (PENDING or PROCESSING) jobs per user
@@ -76,6 +83,7 @@ export async function action({ request }: Route.ActionArgs) {
     data: {
       videoId: video.id,
       targetLanguage,
+      ttsEngine,
     },
   });
 
@@ -95,11 +103,23 @@ export default function NewTranslationPage() {
   const [videoUrl, setVideoUrl] = useState("");
   const [detectedPlatform, setDetectedPlatform] = useState<string | null>(null);
   const [title, setTitle] = useState("");
+  const [engine, setEngine] = useState<"FISH_AUDIO" | "COSYVOICE" | null>(null);
 
   const upload = useUpload();
 
-  const canSubmitUpload = upload.status === "done" && selectedLang;
-  const canSubmitUrl = videoUrl.trim() && detectedPlatform && selectedLang;
+  // If engine changes, validate selected language
+  const handleEngineChange = (newEngine: "FISH_AUDIO" | "COSYVOICE") => {
+    setEngine(newEngine);
+    if (newEngine === "COSYVOICE" && selectedLang) {
+      const COSYVOICE_SUPPORTED = ["en", "zh", "ja", "ko", "de", "es", "fr", "it", "ru"];
+      if (!COSYVOICE_SUPPORTED.includes(selectedLang)) {
+        setSelectedLang(null);
+      }
+    }
+  };
+
+  const canSubmitUpload = upload.status === "done" && selectedLang && engine;
+  const canSubmitUrl = videoUrl.trim() && detectedPlatform && selectedLang && engine;
   const canSubmit = tab === "upload" ? canSubmitUpload : canSubmitUrl;
 
   return (
@@ -156,20 +176,53 @@ export default function NewTranslationPage() {
 
           <Separator />
 
-          <div className="space-y-2">
-            <Label>Target Language</Label>
-            <LanguageSelector value={selectedLang} onChange={setSelectedLang} />
-          </div>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>TTS Engine</Label>
+              <Select
+                value={engine ?? ""}
+                onValueChange={(val) => handleEngineChange(val as "FISH_AUDIO" | "COSYVOICE")}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select a synthesis engine..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="COSYVOICE">
+                    <div className="flex flex-col">
+                      <span>CosyVoice 3 (GPU)</span>
+                      <span className="text-xs text-muted-foreground mt-0.5">High-quality voice cloning (9 languages)</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="FISH_AUDIO">
+                    <div className="flex flex-col">
+                      <span>Fish Audio</span>
+                      <span className="text-xs text-muted-foreground mt-0.5">Versatile generation (12+ languages)</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Select the voice synthesis engine. Note: Supported target languages change based on the engine.
+              </p>
+            </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="title">Video Title</Label>
-            <Input
-              id="title"
-              name="title"
-              placeholder="My Product Demo"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
+            <Separator />
+
+            <div className="space-y-2">
+              <Label>Target Language</Label>
+              <LanguageSelector value={selectedLang} onChange={setSelectedLang} engine={engine} />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="title">Video Title</Label>
+              <Input
+                id="title"
+                name="title"
+                placeholder="My Product Demo"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+            </div>
           </div>
 
           <Form method="post">
@@ -183,6 +236,11 @@ export default function NewTranslationPage() {
               type="hidden"
               name="targetLanguage"
               value={selectedLang ?? ""}
+            />
+            <input
+              type="hidden"
+              name="ttsEngine"
+              value={engine ?? ""}
             />
             {tab === "upload" ? (
               <>

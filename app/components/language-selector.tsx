@@ -47,11 +47,19 @@ export const languages: Language[] = [
 interface LanguageSelectorProps {
   value: string | null;
   onChange: (code: string) => void;
+  engine?: "FISH_AUDIO" | "COSYVOICE" | null;
 }
 
-export function LanguageSelector({ value, onChange }: LanguageSelectorProps) {
+export function LanguageSelector({ value, onChange, engine }: LanguageSelectorProps) {
   const [open, setOpen] = useState(false);
-  const selected = languages.find((l) => l.code === value);
+  
+  const COSYVOICE_SUPPORTED = ["en", "zh", "ja", "ko", "de", "es", "fr", "it", "ru"];
+  
+  const availableLanguages = engine === "COSYVOICE" 
+    ? languages.filter(l => COSYVOICE_SUPPORTED.includes(l.code))
+    : languages;
+
+  const selected = availableLanguages.find((l) => l.code === value);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -61,6 +69,7 @@ export function LanguageSelector({ value, onChange }: LanguageSelectorProps) {
           role="combobox"
           aria-expanded={open}
           className="w-full justify-between"
+          disabled={!engine && engine !== undefined}
         >
           {selected ? `${selected.flag} ${selected.name}` : "Select language..."}
           <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -70,9 +79,9 @@ export function LanguageSelector({ value, onChange }: LanguageSelectorProps) {
         <Command>
           <CommandInput placeholder="Search languages..." />
           <CommandList>
-            <CommandEmpty>No language found.</CommandEmpty>
+            <CommandEmpty>No languages supported by selected engine.</CommandEmpty>
             <CommandGroup>
-              {languages.map((lang) => (
+              {availableLanguages.map((lang) => (
                 <CommandItem
                   key={lang.code}
                   value={lang.name}

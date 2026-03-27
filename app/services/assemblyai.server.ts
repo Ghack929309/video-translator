@@ -156,16 +156,16 @@ function smoothSpeakerLabels(
   const result = segments.map((s) => ({ ...s }));
   let corrections = 0;
 
-  for (let i = 1; i < result.length - 1; i++) {
-    const prev = result[i - 1].speaker;
-    const curr = result[i].speaker;
-    const next = result[i + 1].speaker;
+  for (let i = 1; i < segments.length - 1; i++) {
+    const prev = segments[i - 1].speaker;
+    const curr = segments[i].speaker;
+    const next = segments[i + 1].speaker;
 
     if (!curr || !prev || !next) continue;
 
     // Both neighbors agree but current differs → likely a misdetection
     if (prev === next && curr !== prev) {
-      const durationSec = (result[i].end - result[i].start) / 1000;
+      const durationSec = (segments[i].end - segments[i].start) / 1000;
       // For short segments, always correct. For longer ones, only if < 3s.
       if (durationSec < 3) {
         result[i].speaker = prev;
@@ -176,9 +176,9 @@ function smoothSpeakerLabels(
 
   // Second pass: correct pairs of segments sandwiched between same-speaker blocks
   // e.g. A A B B A A → the two B's might be misdetections if they are short
-  for (let i = 1; i < result.length - 1; i++) {
-    const prev = result[i - 1].speaker;
-    const curr = result[i].speaker;
+  for (let i = 1; i < segments.length - 1; i++) {
+    const prev = segments[i - 1].speaker;
+    const curr = segments[i].speaker;
 
     if (!curr || !prev) continue;
 
@@ -186,7 +186,7 @@ function smoothSpeakerLabels(
     if (curr !== prev) {
       // Find the end of this different-speaker run
       let runEnd = i;
-      while (runEnd < result.length && result[runEnd].speaker === curr) {
+      while (runEnd < segments.length && segments[runEnd].speaker === curr) {
         runEnd++;
       }
       const runLength = runEnd - i;
@@ -194,11 +194,11 @@ function smoothSpeakerLabels(
       // If it's a short run (1-2 segments) and the speaker after matches before
       if (
         runLength <= 2 &&
-        runEnd < result.length &&
-        result[runEnd].speaker === prev
+        runEnd < segments.length &&
+        segments[runEnd].speaker === prev
       ) {
         // Check total duration of the run
-        const runDuration = (result[runEnd - 1].end - result[i].start) / 1000;
+        const runDuration = (segments[runEnd - 1].end - segments[i].start) / 1000;
         if (runDuration < 2) {
           for (let j = i; j < runEnd; j++) {
             result[j].speaker = prev;
