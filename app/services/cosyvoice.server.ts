@@ -3,9 +3,6 @@ import { env } from "~/utils/env.server";
 
 // ── Constants ──────────────────────────────────────────────────────────
 
-const COSYVOICE_SAMPLE_RATE = 24000;
-const COSYVOICE_CHANNELS = 1;
-const COSYVOICE_BIT_DEPTH = 16;
 const MAX_RETRIES = 2;
 
 /**
@@ -29,41 +26,6 @@ export type CosyVoiceLanguage = (typeof COSYVOICE_LANGUAGES)[number];
 // ── Helpers ────────────────────────────────────────────────────────────
 
 /**
- * Wrap raw PCM bytes in a WAV header.
- * CosyVoice returns raw PCM int16, 24kHz, mono — FFmpeg needs a proper WAV.
- */
-function pcmToWav(pcmBuffer: Buffer): Buffer {
-  const byteRate =
-    COSYVOICE_SAMPLE_RATE * COSYVOICE_CHANNELS * (COSYVOICE_BIT_DEPTH / 8);
-  const blockAlign = COSYVOICE_CHANNELS * (COSYVOICE_BIT_DEPTH / 8);
-  const dataSize = pcmBuffer.length;
-  const fileSize = 36 + dataSize;
-
-  const header = Buffer.alloc(44);
-
-  // RIFF chunk descriptor
-  header.write("RIFF", 0); // ChunkID
-  header.writeUInt32LE(fileSize, 4); // ChunkSize
-  header.write("WAVE", 8); // Format
-
-  // fmt sub-chunk
-  header.write("fmt ", 12); // Subchunk1ID
-  header.writeUInt32LE(16, 16); // Subchunk1Size (PCM = 16)
-  header.writeUInt16LE(1, 20); // AudioFormat (PCM = 1)
-  header.writeUInt16LE(COSYVOICE_CHANNELS, 22); // NumChannels
-  header.writeUInt32LE(COSYVOICE_SAMPLE_RATE, 24); // SampleRate
-  header.writeUInt32LE(byteRate, 28); // ByteRate
-  header.writeUInt16LE(blockAlign, 32); // BlockAlign
-  header.writeUInt16LE(COSYVOICE_BIT_DEPTH, 34); // BitsPerSample
-
-  // data sub-chunk
-  header.write("data", 36); // Subchunk2ID
-  header.writeUInt32LE(dataSize, 40); // Subchunk2Size
-
-  return Buffer.concat([header, pcmBuffer]);
-}
-
-/**
  * Select inference mode based on language pair.
  * cross_lingual: source ≠ target (extracts timbre only, uses target phonology)
  * zero_shot: source = target (clones voice + style for same-language synthesis)
@@ -75,25 +37,11 @@ function selectMode(
   return sourceLanguage === targetLanguage ? "zero_shot" : "cross_lingual";
 }
 
-/**
- * Estimate audio duration from raw PCM byte count.
- * Formula: bytes / (sampleRate × channels × bytesPerSample)
- */
-function estimateDurationSec(pcmBytes: number): number {
-  return (
-    pcmBytes /
-    (COSYVOICE_SAMPLE_RATE * COSYVOICE_CHANNELS * (COSYVOICE_BIT_DEPTH / 8))
-  );
-}
-
 // ── Service ────────────────────────────────────────────────────────────
 
 /**
  * CosyVoice 3 service — cross-lingual voice cloning & TTS via self-hosted
- * FastAPI endpoint on RunPod Serverless (GPU).
- *
- * Mirrors the Fish Audio service pattern: object literal export, retry with
- * exponential backoff, response validation.
+ * FastAPI endpoint (GPU docker container).
  */
 export const cosyvoice = {
   /**
@@ -105,7 +53,7 @@ export const cosyvoice = {
    * Synthesize speech from text using a speaker reference audio.
    *
    * @param text - Text to synthesize in the target language
-   * @param promptWavPath - Path to speaker reference WAV (≥16kHz mono, 3–10s)
+   * @param promptWavPath - Path to speaker reference WAV (≥16kHz mono, 3–30s)
    * @param sourceLanguage - ISO 639-1 code of the source audio language
    * @param targetLanguage - ISO 639-1 code of the target language
    * @param speed - Speech speed multiplier (0.5–2.0, default 1.0)
@@ -139,23 +87,23 @@ export const cosyvoice = {
       `[cosyvoice] Synthesizing (mode: ${mode}, target: ${targetLanguage}, speed: ${clampedSpeed})...`,
     );
 
-    // Read and encode reference audio as base64
+    // Read reference audio as Blob for FormData
     const wavBuffer = fs.readFileSync(promptWavPath);
-    const wavBase64 = wavBuffer.toString("base64");
+    const wavBlob = new Blob([wavBuffer], { type: "audio/wav" });
 
-    // Build JSON payload for RunPod Serverless
-    const payload: Record<string, any> = {
-      input: {
-        tts_text: text,
-        mode,
-        prompt_wav: wavBase64,
-        speed: clampedSpeed,
-      },
-    };
+    // Build multipart/form-data payload
+    const formData = new FormData();
+    formData.append("text", text);
+    formData.append("mode", mode);
+    formData.append("speed", String(clampedSpeed));
+    formData.append("reference_audio", wavBlob, "reference.wav");
 
     if (mode === "zero_shot" && promptText) {
-      payload.input.prompt_text = promptText;
-    }
+      formData.append(
+        "reference_text",
+        `You are a helpful assistant.<|endofprompt|>${promptText}`,
+      );
+    } 
 
     // Retry loop with exponential backoff
     let lastError: Error | null = null;
@@ -170,15 +118,11 @@ export const cosyvoice = {
       }
 
       try {
-        // RunPod synchronous serverless endpoint
-        const res = await fetch(`${env.COSYVOICE_URL}/runsync`, {
+        // FastAPI /synthesize endpoint
+        const res = await fetch(`${env.COSYVOICE_URL}/synthesize`, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            // Optional: attach RunPod API key if environment uses auth
-            ...(env.RUNPOD_API_KEY ? { Authorization: `Bearer ${env.RUNPOD_API_KEY}` } : {}),
-          },
-          body: JSON.stringify(payload),
+          // Let fetch automatically set the boundary in Content-Type header
+          body: formData,
         });
 
         if (!res.ok) {
@@ -188,38 +132,20 @@ export const cosyvoice = {
           );
         }
 
-        // RunPod wrapper format: { delayTime, executionTime, id, status, output: { audio, sample_rate, duration_sec } }
-        const jsonResponse = await res.json() as any;
+        // Response is a direct WAV binary stream
+        const arrayBuffer = await res.arrayBuffer();
+        const outputBuffer = Buffer.from(arrayBuffer);
 
-        if (jsonResponse.status !== "COMPLETED" || !jsonResponse.output) {
-          throw new Error(`RunPod job failed or returned no output: ${JSON.stringify(jsonResponse)}`);
-        }
-
-        if (jsonResponse.output.error) {
-          throw new Error(`CosyVoice model error: ${jsonResponse.output.error}`);
-        }
-
-        const audioBase64 = jsonResponse.output.audio;
-        if (!audioBase64) {
+        // Validate: non-empty response
+        if (outputBuffer.length === 0) {
           throw new Error("CosyVoice returned empty audio payload");
         }
 
-        // Decode base64 PCM bytes
-        const pcmBuffer = Buffer.from(audioBase64, "base64");
-
-        // Validate: non-empty response
-        if (pcmBuffer.length === 0) {
-          throw new Error("CosyVoice decoded PCM buffer is empty");
-        }
-
-        const durationSec = jsonResponse.output.duration_sec ?? estimateDurationSec(pcmBuffer.length);
-
         console.log(
-          `[cosyvoice] Synthesized ${durationSec.toFixed(2)}s audio (${pcmBuffer.length} bytes PCM, mode: ${mode})`,
+          `[cosyvoice] Synthesized audio (${outputBuffer.length} bytes WAV, mode: ${mode})`,
         );
 
-        // Convert raw PCM to WAV for FFmpeg compatibility
-        return pcmToWav(pcmBuffer);
+        return outputBuffer;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
         console.warn(
