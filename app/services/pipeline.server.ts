@@ -693,9 +693,9 @@ export const pipeline = {
       progress: 70,
     });
 
-    if (isCosyVoice && env.RUNPOD_ENDPOINT_ID) {
-      await runpodApi.scaleMinWorkers(env.RUNPOD_ENDPOINT_ID, 1);
-      await runpodApi.waitForWorkerReady(env.RUNPOD_ENDPOINT_ID, 180000); // 3 minutes timeout
+    if (isCosyVoice && env.RUNPOD_POD_ID) {
+      await runpodApi.startPod(env.RUNPOD_POD_ID);
+      await runpodApi.waitForPodReady(env.RUNPOD_POD_ID, 180000); // 3 minutes timeout
     }
 
     try {
@@ -880,10 +880,10 @@ export const pipeline = {
 
       console.log(`[pipeline] Step SYNTHESIZE complete — stored at ${audioKey}`);
     } finally {
-      if (isCosyVoice && env.RUNPOD_ENDPOINT_ID) {
-        console.log(`[pipeline] Ensuring RunPod endpoint scales down its active core count...`);
-        await runpodApi.scaleMinWorkers(env.RUNPOD_ENDPOINT_ID, 0).catch(err => 
-          console.error(`[pipeline] FAILED to scale down RunPod endpoint!`, err)
+      if (isCosyVoice && env.RUNPOD_POD_ID) {
+        console.log(`[pipeline] Ensuring RunPod Standard Pod stops compute billing...`);
+        await runpodApi.stopPod(env.RUNPOD_POD_ID).catch((err: any) => 
+          console.error(`[pipeline] FAILED to stop RunPod On-Demand Pod!`, err)
         );
       }
     }

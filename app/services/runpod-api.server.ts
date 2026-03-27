@@ -1,13 +1,13 @@
 import { env } from "~/utils/env.server";
 
-export type RunPodEndpointStatus = {
+export type RunPodStatus = {
   id: string;
-  workersMin: number;
-  workersMax: number;
-  idleTimeout: number;
-  name: string;
-  // Mapped from REST /health
-  workers: Array<{ status: string }>; 
+  name?: string;
+  desiredStatus: string;
+  runtime?: {
+    uptimeInSeconds: number;
+    ports?: Array<{ privatePort: number; isIpPublic: boolean; publicPort: number; ip: string }>;
+  };
 };
 
 const RUNPOD_GRAPHQL_URL = "https://api.runpod.io/graphql";
@@ -40,118 +40,71 @@ async function runpodGraphQL<T>(query: string, variables: Record<string, any> = 
 
 export const runpodApi = {
   /**
-   * Modifies the Endpoint configuration directly.
-   * To safely wake a worker without overwriting User configurations, we strictly
-   * query the existing setup, and spread it into the dangerous saveEndpoint mutation,
-   * isolating the update to just workersMin.
+   * Resumes an existing Pod. 
+   * This instantly starts billing for GPU compute and initializes the container via FlashBoot.
    */
-  async scaleMinWorkers(endpointId: string, minWorkers: number): Promise<void> {
-    console.log(`[runpod-api] Querying existing config to scale endpoint ${endpointId} to min workers: ${minWorkers}`);
-    
-    // 1. Fetch current safe parameters
-    const query = `
-      query getSafeParams($id: String!) {
-        myself {
-          endpoint(id: $id) {
-            id name templateId gpuIds networkVolumeId idleTimeout workersMin
-          }
-        }
+  async startPod(podId: string): Promise<void> {
+    console.log(`[runpod-api] Waking up On-Demand Pod ${podId}...`);
+    await runpodGraphQL(`
+      mutation podResume($input: PodResumeInput!) {
+        podResume(input: $input) { id desiredStatus }
       }
-    `;
-    const data = await runpodGraphQL<any>(query, { id: endpointId });
-    const currentConfig = data?.myself?.endpoint;
-    if (!currentConfig) throw new Error("Could not find endpoint on RunPod Account!");
-
-    const safeInput = currentConfig;
-    // 2. Perform safe mutated save
-    console.log(`[runpod-api] Pushing saveEndpoint with Min Workers => ${minWorkers}`);
-    const mutation = `
-      mutation saveEndpoint($input: EndpointInput!) {
-        saveEndpoint(input: $input) {
-          id
-          workersMin
-        }
-      }
-    `;
-
-    await runpodGraphQL<{ saveEndpoint: { id: string; workersMin: number } }>(mutation, {
-      input: {
-        ...safeInput,
-        workersMin: minWorkers,
-      }
-    });
+    `, { input: { podId } });
   },
 
   /**
-   * Fetches the Endpoint state via GraphQL and pulls actual worker counts via REST /health API
+   * Stops an existing Pod.
+   * This immediately detaches the GPU and freezes billing down to just Disk Storage.
    */
-  async getEndpointStatus(endpointId: string): Promise<RunPodEndpointStatus | null> {
+  async stopPod(podId: string): Promise<void> {
+    console.log(`[runpod-api] Stopping On-Demand Pod ${podId}...`);
+    await runpodGraphQL(`
+      mutation podStop($input: PodStopInput!) {
+        podStop(input: $input) { id desiredStatus }
+      }
+    `, { input: { podId } });
+  },
+
+  /**
+   * Fetches the Pod state via GraphQL.
+   */
+  async getPodStatus(podId: string): Promise<RunPodStatus | null> {
     const apiKey = env.RUNPOD_API_KEY;
     if (!apiKey) return null;
 
-    // Call Both APIs concurrently
-    const [gqlData, healthRes] = await Promise.all([
-      runpodGraphQL<any>(`
-        query getConfig($id: String!) {
-          myself {
-            endpoint(id: $id) {
-              id workersMin workersMax idleTimeout name
-            }
+    const data = await runpodGraphQL<any>(`
+      query getPods {
+        myself {
+          pods {
+            id name desiredStatus
+            runtime { uptimeInSeconds ports { privatePort isIpPublic publicPort ip } }
           }
         }
-      `, { id: endpointId }),
-      fetch(`https://api.runpod.ai/v2/${endpointId}/health`, {
-        headers: { Authorization: `Bearer ${apiKey}` }
-      })
-    ]);
+      }
+    `);
 
-    const endpointConfig = gqlData?.myself?.endpoint;
-    if (!endpointConfig) return null;
-
-    let runningWorkersCount = 0;
-    if (healthRes.ok) {
-        const healthJson = await healthRes.json();
-        // healthJson.workers = { idle, initializing, ready, running, throttled, unhealthy }
-        const w = healthJson.workers;
-        if (w) {
-            runningWorkersCount = (w.running || 0) + (w.initializing || 0) + (w.ready || 0) + (w.idle || 0);
-        }
-    }
-
-    // Faux structure mapping for the previously built dashboard expectation
-    const fauxWorkersArray = Array.from({ length: runningWorkersCount }).map(() => ({ status: "RUNNING" }));
-
-    return {
-      ...endpointConfig,
-      workers: fauxWorkersArray
-    };
+    return data?.myself?.pods?.find((p: any) => p.id === podId) || null;
   },
 
   /**
-   * Waits actively until at least one worker is RUNNING.
+   * Polls the Pod status until `runtime` is fully injected with exposed Ports.
    */
-  async waitForWorkerReady(endpointId: string, timeoutMs: number = 180000): Promise<void> {
-    const apiKey = env.RUNPOD_API_KEY;
-    if (!apiKey) return;
-    
+  async waitForPodReady(podId: string, timeoutMs: number = 180000): Promise<void> {
     const start = Date.now();
-    console.log(`[runpod-api] Polling REST /health of endpoint ${endpointId} until ready...`);
-
+    console.log(`[runpod-api] Polling getPodStatus for ${podId} until RUNNING...`);
+    
     while (Date.now() - start < timeoutMs) {
-      const res = await fetch(`https://api.runpod.ai/v2/${endpointId}/health`, {
-        headers: { Authorization: `Bearer ${apiKey}` }
-      });
+      const pod = await this.getPodStatus(podId);
       
-      if (res.ok) {
-          const health = await res.json();
-          if (health?.workers && (health.workers.running > 0 || health.workers.ready > 0 || health.workers.initializing > 0 || health.workers.idle > 0)) {
-              console.log(`[runpod-api] Worker instantiated! Took ${((Date.now() - start) / 1000).toFixed(1)}s`);
-              return;
-          }
+      // Pod is considered awake when desiredStatus == 'RUNNING' and runtime initialization succeeded
+      if (pod && pod.desiredStatus === "RUNNING" && pod.runtime) {
+        console.log(`[runpod-api] Pod is completely initialized! Took ${((Date.now() - start) / 1000).toFixed(1)}s`);
+        return;
       }
+      
       await new Promise(r => setTimeout(r, 2000));
     }
 
-    throw new Error(`Timeout waiting for RunPod worker on endpoint ${endpointId} to spin up.`);
+    throw new Error(`Timeout waiting for RunPod On-Demand Pod ${podId} to boot up.`);
   }
 };

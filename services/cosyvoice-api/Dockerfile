@@ -39,5 +39,5 @@ COPY server.py .
 COPY handler.py .
 ENV PYTHONPATH="/workspace/CosyVoice:/workspace/CosyVoice/third_party/Matcha-TTS"
 
-EXPOSE 50000
-CMD ["python", "-u", "handler.py"]
+EXPOSE 8000
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]

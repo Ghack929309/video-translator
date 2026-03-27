@@ -15,9 +15,9 @@ export function meta() {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   let runpodStatus = null;
-  if (env.RUNPOD_ENDPOINT_ID) {
+  if (env.RUNPOD_POD_ID) {
     try {
-      runpodStatus = await runpodApi.getEndpointStatus(env.RUNPOD_ENDPOINT_ID);
+      runpodStatus = await runpodApi.getPodStatus(env.RUNPOD_POD_ID);
     } catch (e) {
       console.error("Failed to fetch RunPod status", e);
     }
@@ -29,8 +29,8 @@ export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData();
   const intent = formData.get("intent");
 
-  if (intent === "shutdown_runpod" && env.RUNPOD_ENDPOINT_ID) {
-    await runpodApi.scaleMinWorkers(env.RUNPOD_ENDPOINT_ID, 0);
+  if (intent === "shutdown_runpod" && env.RUNPOD_POD_ID) {
+    await runpodApi.stopPod(env.RUNPOD_POD_ID);
     return { success: true };
   }
   return { success: false };
@@ -61,13 +61,17 @@ export default function AdminDashboardPage({ loaderData }: any) {
   let badgeVariant: "default" | "secondary" | "destructive" | "outline" = "outline";
 
   if (currentStatus) {
-    const active = currentStatus.workers?.filter((w: any) => w.status === "RUNNING").length || 0;
-    if (active > 0) {
-      badgeLabel = "Online";
-      badgeVariant = "default";
-    } else if (currentStatus.workersMin > 0) {
-      badgeLabel = "Scaling Up...";
-      badgeVariant = "secondary";
+    if (currentStatus.desiredStatus === "RUNNING") {
+      if (currentStatus.runtime?.ports?.length > 0) {
+        badgeLabel = "Online";
+        badgeVariant = "default";
+      } else {
+        badgeLabel = "Waking Up...";
+        badgeVariant = "secondary";
+      }
+    } else {
+      badgeLabel = "Asleep";
+      badgeVariant = "outline";
     }
   }
 
@@ -106,7 +110,7 @@ export default function AdminDashboardPage({ loaderData }: any) {
                 <Server className="h-5 w-5" /> 
                 CosyVoice API Server
               </CardTitle>
-              <CardDescription>RunPod Serverless V2 Endpoint</CardDescription>
+              <CardDescription>RunPod Standard Pod Node</CardDescription>
             </div>
             {currentStatus && (
               <Badge variant={badgeVariant} className="px-3 py-1 text-sm font-medium">
@@ -120,12 +124,12 @@ export default function AdminDashboardPage({ loaderData }: any) {
               <>
                  <div className="grid grid-cols-2 text-sm gap-2">
                     <div className="flex flex-col">
-                      <span className="text-muted-foreground">Configured Min/Max</span>
-                      <span className="font-medium">{currentStatus.workersMin} / {currentStatus.workersMax}</span>
+                      <span className="text-muted-foreground">Pod ID</span>
+                      <span className="font-medium">{currentStatus.id}</span>
                     </div>
                     <div className="flex flex-col">
-                      <span className="text-muted-foreground">Running Pods</span>
-                      <span className="font-medium">{currentStatus.workers?.filter((w: any) => w.status === "RUNNING").length || 0}</span>
+                      <span className="text-muted-foreground">Status</span>
+                      <span className="font-medium">{currentStatus.runtime?.uptimeInSeconds ? `Up ${currentStatus.runtime.uptimeInSeconds}s` : "Offline"}</span>
                     </div>
                  </div>
 
@@ -134,7 +138,7 @@ export default function AdminDashboardPage({ loaderData }: any) {
                    <Button 
                      variant="destructive" 
                      className="w-full"
-                     disabled={currentStatus.workersMax === 0}
+                     disabled={currentStatus.desiredStatus !== "RUNNING"}
                      type="submit"
                    >
                      <PowerOff className="mr-2 h-4 w-4" />
@@ -144,7 +148,7 @@ export default function AdminDashboardPage({ loaderData }: any) {
               </>
             ) : (
               <div className="text-sm text-muted-foreground">
-                RunPod Endpoint ID is not configured or unreachable via GraphQL.
+                RunPod Pod ID is not configured or unreachable via GraphQL.
               </div>
             )}
           </CardContent>
