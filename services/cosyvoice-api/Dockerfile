@@ -22,6 +22,9 @@ ENV PATH="/opt/conda/envs/cosyvoice/bin:$PATH"
 RUN git clone --recursive https://github.com/FunAudioLLM/CosyVoice.git
 
 # 5. Pipeline Python dependencies (order matters for caching)
+# Pre-install openai-whisper with legacy setuptools to avoid pkg_resources build isolation errors
+RUN pip install --no-cache-dir "setuptools<70" wheel && \
+    pip install --no-cache-dir --no-build-isolation openai-whisper==20231117
 RUN pip install --no-cache-dir -r CosyVoice/requirements.txt
 
 COPY requirements.txt .

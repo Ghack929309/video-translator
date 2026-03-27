@@ -37,7 +37,7 @@ if MODEL_SOURCE == "huggingface":
     from huggingface_hub import snapshot_download
 
     model_path = snapshot_download(
-        repo_id="FunAudioLLM/CosyVoice3-0.5B",
+        repo_id="FunAudioLLM/Fun-CosyVoice3-0.5B",
         local_dir=MODEL_DIR,
     )
     model = AutoModel(model_dir=model_path)
