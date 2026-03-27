@@ -83,6 +83,9 @@ export const cosyvoice = {
     const mode = selectMode(sourceLanguage, targetLanguage);
     const clampedSpeed = Math.max(0.5, Math.min(2.0, speed ?? 1.0));
 
+    // CosyVoice demands explicit linguistic tokenization markers for cross-lingual zero-shot
+    const finalText = `<|${targetLanguage}|>${text}`;
+
     console.log(
       `[cosyvoice] Synthesizing via RunPod Serverless (mode: ${mode}, target: ${targetLanguage}, speed: ${clampedSpeed})...`,
     );
@@ -93,7 +96,7 @@ export const cosyvoice = {
 
     // Build JSON payload for RunPod Serverless
     const inputPayload: Record<string, any> = {
-      tts_text: text,
+      tts_text: finalText,
       mode: mode,
       speed: clampedSpeed,
       prompt_wav: wavBase64,

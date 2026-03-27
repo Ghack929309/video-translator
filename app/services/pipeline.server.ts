@@ -124,6 +124,19 @@ export const pipeline = {
     });
 
     try {
+      // Phase 9: Pre-Heating (Run immediately. If the physical host lacks GPUs, immediately abort before wasting third-party credits)
+      if (translation.ttsEngine === "COSYVOICE" && env.RUNPOD_POD_ID && startIndex <= 5) {
+        console.log(`[pipeline] Waking CosyVoice Pod...`);
+        try {
+          await runpodApi.startPod(env.RUNPOD_POD_ID);
+        } catch (err) {
+          console.error("[pipeline] Pre-heat startPod failed:", err);
+          throw new Error(
+            "RunPod infrastructure is currently at maximum capacity (No free GPUs on your Pod's host machine). " +
+            "Please click Retry on this translation in a few minutes once capacity clears up."
+          );
+        }
+      }
       const stepFns: Array<{ name: PipelineStep; fn: () => Promise<void> }> = [
         {
           name: "DOWNLOAD",
@@ -173,6 +186,36 @@ export const pipeline = {
       });
     } finally {
       ffmpeg.cleanup(translationId);
+
+      // Phase 9: Concurrency Safety (Queue Check Before Shutdown)
+      if (translation.ttsEngine === "COSYVOICE" && env.RUNPOD_POD_ID) {
+        try {
+          // Check if there are other processing/pending CosyVoice jobs
+          const activeJobs = await db.translation.count({
+            where: {
+              status: { in: ["PENDING", "PROCESSING"] },
+              id: { not: translationId },
+              ttsEngine: "COSYVOICE",
+            },
+          });
+
+          if (activeJobs > 0) {
+            console.log(
+              `[pipeline] Keeping RunPod On-Demand Pod awake — ${activeJobs} CosyVoice jobs still active.`,
+            );
+          } else {
+            console.log(
+              `[pipeline] Ensuring RunPod Standard Pod stops compute billing (Queue Empty)...`,
+            );
+            await runpodApi.stopPod(env.RUNPOD_POD_ID);
+          }
+        } catch (queueErr) {
+          console.error(
+            `[pipeline] FAILED to safely check queue or stop RunPod On-Demand Pod!`,
+            queueErr,
+          );
+        }
+      }
     }
   },
 
@@ -547,52 +590,46 @@ export const pipeline = {
       const speaker = speakers[si];
       const segments = speakerSegments.get(speaker)!;
 
-      // Extract up to 30s of this speaker's audio segments
-      const speakerParts: string[] = [];
-      let totalDuration = 0;
-
-      for (let j = 0; j < segments.length && totalDuration < 30; j++) {
-        const seg = segments[j];
-        const startSec = seg.start / 1000;
-        const endSec = seg.end / 1000;
-        const segDur = endSec - startSec;
-        if (segDur < 0.3) continue; // skip very short segments
-
-        const partPath = path.join(tmpDir, `speaker-${speaker}-part-${j}.wav`);
-        await ffmpeg.extractTimeRange(audioPath, startSec, endSec, partPath);
-        speakerParts.push(partPath);
-        totalDuration += segDur;
+      // Ensure pristine embeddings: Find the single longest clean segment instead of micro-stitching cuts
+      let bestSegment: { start: number; end: number; duration: number } | null = null;
+      for (const seg of segments) {
+        const durationSec = (seg.end - seg.start) / 1000;
+        if (!bestSegment || durationSec > bestSegment.duration) {
+          bestSegment = { start: seg.start, end: seg.end, duration: durationSec };
+        }
       }
 
-      if (speakerParts.length === 0) {
+      if (!bestSegment || bestSegment.duration < 0.5) {
         console.warn(
           `[pipeline] No usable audio for speaker ${speaker}, skipping`,
         );
         continue;
       }
 
-      // Concatenate speaker parts into a single sample
+      const startSec = bestSegment.start / 1000;
+      let endSec = bestSegment.end / 1000;
+      // Cap embeddings strictly below maximum memory window thresholds
+      if (endSec - startSec > 10) {
+        endSec = startSec + 10;
+      }
+
       const speakerSamplePath = path.join(
         tmpDir,
         `speaker-${speaker}-sample.wav`,
       );
-      await ffmpeg.concatenateAudio(speakerParts, speakerSamplePath);
+      await ffmpeg.extractTimeRange(audioPath, startSec, endSec, speakerSamplePath);
+      const totalDuration = endSec - startSec;
 
       if (isCosyVoice) {
-        // CosyVoice: keep the raw WAV reference — no model creation needed
-        // Trim to 10s max for optimal cross-lingual synthesis
+        // CosyVoice: reference is already a single contiguous clean shot under 10s
         const refPath = path.join(tmpDir, `speaker-${speaker}-ref.wav`);
-        if (totalDuration > 10) {
-          await ffmpeg.extractTimeRange(speakerSamplePath, 0, 10, refPath);
-        } else {
-          fs.copyFileSync(speakerSamplePath, refPath);
-        }
+        fs.copyFileSync(speakerSamplePath, refPath);
         voiceMap[speaker] = refPath;
         console.log(
-          `[pipeline] Extracted CosyVoice ref for speaker ${speaker}: ${refPath} (${Math.min(totalDuration, 10).toFixed(1)}s)`,
+          `[pipeline] Extracted CosyVoice ref for speaker ${speaker}: ${refPath} (${totalDuration.toFixed(1)}s)`,
         );
       } else {
-        // Fish Audio: trim, compress, and create persistent voice model
+        // Fish Audio: compress, and create persistent voice model
         const trimmedPath = path.join(
           tmpDir,
           `speaker-${speaker}-trimmed.mp3`,
@@ -650,6 +687,7 @@ export const pipeline = {
   async stepSynthesize(translationId: string) {
     const translation = await db.translation.findUniqueOrThrow({
       where: { id: translationId },
+      include: { video: true },
     });
 
     const isCosyVoice = translation.ttsEngine === "COSYVOICE";
@@ -694,7 +732,7 @@ export const pipeline = {
     });
 
     if (isCosyVoice && env.RUNPOD_POD_ID) {
-      await runpodApi.startPod(env.RUNPOD_POD_ID);
+      // startPod is now executed asynchronously at the absolute beginning of the pipeline (Phase 9)
       await runpodApi.waitForPodReady(env.RUNPOD_POD_ID, 180000); // 3 minutes timeout
     }
 
@@ -741,117 +779,116 @@ export const pipeline = {
     // This prevents cumulative drift — each segment is placed at its exact timestamp.
     const audioParts: string[] = [];
     let runningPositionMs = 0; // tracks where we are in the output audio timeline
-
     for (let i = 0; i < segments.length; i++) {
-      const seg = segments[i];
-      const segDurationSec = (seg.end - seg.start) / 1000;
+        const seg = segments[i];
+        const segDurationSec = (seg.end - seg.start) / 1000;
+        const nextSegStart = i + 1 < segments.length ? segments[i + 1].start : (translation.video.durationSec ?? 0) * 1000;
+        
+        // availableRoom is the exact timeframe until the subsequent speaker physically begins
+        const availableRoomMs = nextSegStart - seg.start;
+        const availableRoomSec = availableRoomMs / 1000;
 
-      // Silence gap: use absolute position to compute gap, not relative to prev segment
-      const gapMs = seg.start - runningPositionMs;
-      const gapSec = gapMs / 1000;
+        // Silence gap: absolute gap checking relative to true audio payload depth
+        const gapMs = seg.start - runningPositionMs;
+        const gapSec = gapMs / 1000;
 
-      if (gapSec > 0.02) {
-        const silencePath = path.join(tmpDir, `silence-${i}.wav`);
-        await ffmpeg.generateSilence(gapSec, silencePath);
-        audioParts.push(silencePath);
-        runningPositionMs += gapMs;
-      } else if (gapSec < -0.05) {
-        // Negative gap means we've drifted ahead — log but don't insert negative silence
-        console.warn(
-          `[pipeline] Segment ${i} drift: ${gapSec.toFixed(3)}s ahead of expected position`,
-        );
-      }
-
-      // Generate TTS for the segment
-      const rawPath = path.join(tmpDir, `tts-raw-${i}.wav`);
-      const stretchedPath = path.join(tmpDir, `tts-stretched-${i}.wav`);
-
-      // Skip empty/whitespace-only segments — insert silence instead of calling TTS
-      if (!seg.translatedText || seg.translatedText.trim().length === 0) {
-        console.warn(
-          `[pipeline] Segment ${i}: empty translated text, inserting silence (${segDurationSec.toFixed(1)}s)`,
-        );
-        const emptyPath = path.join(tmpDir, `empty-${i}.wav`);
-        await ffmpeg.generateSilence(Math.max(segDurationSec, 0.1), emptyPath);
-        audioParts.push(emptyPath);
-        runningPositionMs = seg.end;
-        const segProgress = 70 + Math.round((i / segments.length) * 10);
-        await updateTranslation(translationId, { progress: segProgress });
-        continue;
-      }
-
-      try {
-        // Use the correct voice for this speaker
-        const speakerRef = voiceMap[seg.speaker ?? "A"] ?? defaultVoiceRef;
-        if (!speakerRef) {
-          throw new Error(`No voice ref for speaker ${seg.speaker ?? "A"}`);
-        }
-
-        // Estimate prosody speed hint: if translated text is much longer/shorter
-        // than the time slot allows, hint TTS to speak faster/slower
-        // This reduces the amount of post-processing stretch needed
-        const avgCharsPerSec = 14; // rough estimate for natural speech
-        const expectedDuration = seg.translatedText.length / avgCharsPerSec;
-        const prosodySpeed =
-          segDurationSec > 0.5 && expectedDuration > 0
-            ? Math.max(0.7, Math.min(1.8, expectedDuration / segDurationSec))
-            : undefined;
-
-        let audioBuffer: Buffer;
-
-        if (isCosyVoice) {
-          // CosyVoice: send reference WAV path inline
-          audioBuffer = await cosyvoice.synthesize(
-            seg.translatedText,
-            speakerRef,
-            sourceLanguage,
-            translation.targetLanguage,
-            prosodySpeed,
-          );
-        } else {
-          // Fish Audio: use persistent voice model ID
-          audioBuffer = await fishAudio.synthesize(
-            seg.translatedText,
-            speakerRef,
-            translation.targetLanguage,
-            prosodySpeed,
+        if (gapSec > 0.02) {
+          const silencePath = path.join(tmpDir, `silence-${i}.wav`);
+          await ffmpeg.generateSilence(gapSec, silencePath);
+          audioParts.push(silencePath);
+          runningPositionMs += gapMs;
+        } else if (gapSec < -0.05) {
+          console.warn(
+            `[pipeline] Segment ${i} drift warning: ${gapSec.toFixed(3)}s behind audio playhead`,
           );
         }
-        fs.writeFileSync(rawPath, audioBuffer);
 
-        // Time-stretch to EXACT target duration (with clamping, truncate/pad)
-        if (segDurationSec > 0.1) {
-          const { stretchRatio } = await ffmpeg.timeStretchExact(
-            rawPath,
-            segDurationSec,
-            stretchedPath,
+        // Generate TTS for the segment
+        const rawPath = path.join(tmpDir, `tts-raw-${i}.wav`);
+        const stretchedPath = path.join(tmpDir, `tts-stretched-${i}.wav`);
+
+        // Skip empty/whitespace-only segments — insert silence instead of calling TTS
+        if (!seg.translatedText || seg.translatedText.trim().length === 0) {
+          console.warn(
+            `[pipeline] Segment ${i}: empty translated text, inserting silence (${segDurationSec.toFixed(1)}s)`,
           );
-          if (stretchRatio > 1.8 || stretchRatio < 0.6) {
-            console.warn(
-              `[pipeline] Segment ${i}: extreme stretch ratio ${stretchRatio.toFixed(2)} ` +
-                `(TTS generated ${(await ffmpeg.getDuration(rawPath)).toFixed(1)}s for ${segDurationSec.toFixed(1)}s slot)`,
+          const emptyPath = path.join(tmpDir, `empty-${i}.wav`);
+          await ffmpeg.generateSilence(Math.max(segDurationSec, 0.1), emptyPath);
+          audioParts.push(emptyPath);
+          runningPositionMs += (Math.max(segDurationSec, 0.1) * 1000); // fluid timestamp extension
+          const segProgress = 70 + Math.round((i / segments.length) * 10);
+          await updateTranslation(translationId, { progress: segProgress });
+          continue;
+        }
+
+        try {
+          // Use the correct voice for this speaker
+          const speakerRef = voiceMap[seg.speaker ?? "A"] ?? defaultVoiceRef;
+          if (!speakerRef) {
+            throw new Error(`No voice ref for speaker ${seg.speaker ?? "A"}`);
+          }
+
+          // Phase 10: Fluid Pacing. Allow generation at normalized speed arrays.
+          const avgCharsPerSec = 14; 
+          const expectedDuration = seg.translatedText.length / avgCharsPerSec;
+          
+          // Prosody speed only compresses if it structurally breaks adjacent bounds
+          const prosodySpeed = 
+            expectedDuration > availableRoomSec && availableRoomSec > 0.5
+              ? Math.max(1.0, Math.min(1.5, expectedDuration / availableRoomSec))
+              : 1.0;
+
+          let audioBuffer: Buffer;
+
+          if (isCosyVoice) {
+            // CosyVoice: send reference WAV path inline
+            audioBuffer = await cosyvoice.synthesize(
+              seg.translatedText,
+              speakerRef,
+              sourceLanguage,
+              translation.targetLanguage,
+              prosodySpeed,
+            );
+          } else {
+            // Fish Audio: use persistent voice model ID
+            audioBuffer = await fishAudio.synthesize(
+              seg.translatedText,
+              speakerRef,
+              translation.targetLanguage,
+              prosodySpeed,
             );
           }
-          audioParts.push(stretchedPath);
-        } else {
-          audioParts.push(rawPath);
+          fs.writeFileSync(rawPath, audioBuffer);
+          const actualGeneratedSec = await ffmpeg.getDuration(rawPath);
+
+          // Fluid Time Stretch check
+          if (actualGeneratedSec > availableRoomSec && availableRoomSec > 0.1) {
+            // Audio overflows into the next speaker's lips! Squish it perfectly over the max allowance
+            const { outputPath: finalPath } = await ffmpeg.timeStretchExact(
+              rawPath,
+              availableRoomSec,
+              stretchedPath,
+            );
+            audioParts.push(finalPath);
+            runningPositionMs += (availableRoomSec * 1000);
+          } else {
+            // Audio fits cleanly within the bounds & gaps! NO distortive stretching!
+            audioParts.push(rawPath);
+            runningPositionMs += (actualGeneratedSec * 1000);
+          }
+        } catch (err) {
+          console.warn(
+            `[pipeline] TTS failed for segment ${i}, inserting silence: ${err}`,
+          );
+          // Fallback: insert silence matching segment duration
+          const fallbackPath = path.join(tmpDir, `fallback-${i}.wav`);
+          await ffmpeg.generateSilence(
+            Math.max(segDurationSec, 0.1),
+            fallbackPath,
+          );
+          audioParts.push(fallbackPath);
+          runningPositionMs += (Math.max(segDurationSec, 0.1) * 1000);
         }
-      } catch (err) {
-        console.warn(
-          `[pipeline] TTS failed for segment ${i}, inserting silence: ${err}`,
-        );
-        // Fallback: insert silence matching segment duration
-        const fallbackPath = path.join(tmpDir, `fallback-${i}.wav`);
-        await ffmpeg.generateSilence(
-          Math.max(segDurationSec, 0.1),
-          fallbackPath,
-        );
-        audioParts.push(fallbackPath);
-      }
-
-      // Advance running position by exactly the segment duration (absolute alignment)
-      runningPositionMs = seg.end;
-
       // Rate-limit: small delay between TTS calls to avoid hammering API
       if (i < segments.length - 1) {
         await new Promise((r) => setTimeout(r, 150));

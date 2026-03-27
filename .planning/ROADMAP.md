@@ -116,6 +116,26 @@ Plans:
 Plans:
 - [ ] TBD (run /gsd-plan-phase 8 to break down)
 
+### Phase 9: Optimize Pod Scheduling and Lifecycle Safety
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 8
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 9 to break down)
+
+### Phase 10: Enhance voice cloning synthesis and merge synchronization
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 9
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 10 to break down)
+
 ---
 
 *Roadmap created: 2026-03-26*

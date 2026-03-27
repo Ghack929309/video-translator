@@ -10,6 +10,9 @@ import {
   QUEUE_NAME,
 } from "~/services/worker.server";
 import { pipeline } from "~/services/pipeline.server";
+import { db } from "~/services/db.server";
+import { runpodApi } from "~/services/runpod-api.server";
+import { env } from "~/utils/env.server";
 
 let running = true;
 
@@ -17,8 +20,49 @@ let running = true;
 // consumers while being processed. Set high enough for the pipeline to finish.
 const VISIBILITY_TIMEOUT = 3900; // 65 minutes (must exceed JOB_TIMEOUT_MS)
 
+function startWatchdog() {
+  console.log("[watchdog] Starting 10-minute idle checks...");
+  setInterval(async () => {
+    try {
+      const staleLimit = new Date(Date.now() - 60 * 60 * 1000); // 1 hour ago
+      const stalledJobs = await db.translation.findMany({
+        where: {
+          status: "PROCESSING",
+          updatedAt: { lt: staleLimit },
+        },
+      });
+
+      if (stalledJobs.length > 0) {
+        console.warn(
+          `[watchdog] Found ${stalledJobs.length} stalled jobs. Failing them and halting Pods.`,
+        );
+        for (const job of stalledJobs) {
+          await db.translation.update({
+            where: { id: job.id },
+            data: {
+              status: "FAILED",
+              errorMessage: "Unrecoverable Execution Timeout (1hr)",
+            },
+          });
+        }
+
+        if (env.RUNPOD_POD_ID) {
+          console.warn(`[watchdog] Halting On-Demand Pod due to stalled jobs.`);
+          await runpodApi
+            .stopPod(env.RUNPOD_POD_ID)
+            .catch((e: any) => console.error("[watchdog] Failed to stop pod:", e));
+        }
+      }
+    } catch (e) {
+      console.error("[watchdog] Error:", e);
+    }
+  }, 10 * 60 * 1000); // 10 minutes
+}
+
 async function main() {
   console.log("[worker] Starting...");
+
+  startWatchdog();
 
   const client = createPgClient();
   await client.connect();
