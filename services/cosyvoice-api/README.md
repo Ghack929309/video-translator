@@ -54,40 +54,34 @@ MODEL_SOURCE=huggingface python handler.py --rp_serve_api --rp_api_port 8000
 python test_handler.py path/to/reference_audio.wav
 ```
 
-## Production (RunPod Serverless)
+## Production (RunPod Standard On-Demand)
 
 ### Build & Push
 
 ```bash
-docker build -t your-registry/cosyvoice-api:latest .
-docker push your-registry/cosyvoice-api:latest
+# Build the Docker image (this will automatically download and physically bake the CosyVoice model into /app)
+docker build -t ghack929309/dubly-cosyvoice-api:latest .
+
+# Push your fresh image to Docker Hub
+docker push ghack929309/dubly-cosyvoice-api:latest
 ```
 
 ### RunPod Setup
 
-1. Create a **Network Volume** and upload model weights:
-   ```
-   /runpod-volume/models/Fun-CosyVoice3-0.5B/
-   ```
+1. Spin up a new **Secure Cloud Pod**:
+   - **Template**: Select your Custom Template or specify the image: `ghack929309/dubly-cosyvoice-api:latest`
+   - **GPU**: RTX 4090 or A100 (8GB+ VRAM)
+   - **Ports**: Expose `8000` (HTTP)
+   - **Volume**: (Optional) You can safely attach a Network Volume to `/workspace`. The models are now securely locked inside `/app` so external volumes will not mask them.
 
-2. Create a **Serverless Endpoint** with:
-   - Docker image: `your-registry/cosyvoice-api:latest`
-   - GPU: RTX 4090 or A100 (8GB+ VRAM)
-   - Volume: Mount your network volume
-   - Env: `MODEL_SOURCE=volume`
-
-3. Set `COSYVOICE_URL` in your Dubly `.env`:
-   ```
-   COSYVOICE_URL=https://api.runpod.ai/v2/{endpoint-id}
+2. Set your orchestrator variables in the Dubly backend `.env`:
+   ```env
+   RUNPOD_API_KEY=your_runpod_api_token
+   RUNPOD_POD_ID=your_pod_instance_id
+   COSYVOICE_URL=https://{your_pod_instance_id}-8000.proxy.runpod.net/synthesize
    ```
 
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MODEL_SOURCE` | `huggingface` | `huggingface` (dev) or `volume` (prod) |
-| `MODEL_DIR` | `pretrained_models/Fun-CosyVoice3-0.5B` | HuggingFace download path |
-| `VOLUME_MODEL_PATH` | `/runpod-volume/models/Fun-CosyVoice3-0.5B` | Network volume model path |
+> **Note:** The Dubly backend automatically manages your hardware. It wakes up the Pod via GraphQL when a translation is requested, routes audio through the 8000 proxy port instantly, and powers the GPU down to save money once finished!
 
 ## API
 

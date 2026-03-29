@@ -5,7 +5,7 @@
  * Run with: npx tsx worker.ts
  */
 import {
-  createPgClient,
+  createPgPool,
   ensureQueue,
   QUEUE_NAME,
 } from "~/services/worker.server";
@@ -64,16 +64,21 @@ async function main() {
 
   startWatchdog();
 
-  const client = createPgClient();
-  await client.connect();
-  await ensureQueue(client);
+  const pool = createPgPool();
+  
+  // Neutralize proxy timeouts (ETIMEDOUT) crashing Node during massive 10+ minute AI jobs.
+  pool.on("error", (err: Error) => {
+    console.error("[worker] Idle PostgreSQL connection dropped (Silently discarding):", err.message);
+  });
+
+  await ensureQueue(pool);
 
   console.log(`[worker] Listening for ${QUEUE_NAME} messages...`);
 
   while (running) {
     try {
       // read_with_poll: blocks up to max_poll_seconds waiting for a message
-      const result = await client.query(
+      const result = await pool.query(
         "SELECT * FROM pgmq.read_with_poll($1, $2, $3, $4, $5)",
         [QUEUE_NAME, VISIBILITY_TIMEOUT, 1, 5, 250],
         // queue, vt, qty, max_poll_seconds, poll_interval_ms
@@ -93,7 +98,7 @@ async function main() {
         await pipeline.run(payload.translationId);
 
         // Archive the message on success (moves to archive table)
-        await client.query("SELECT pgmq.archive($1, $2::bigint)", [
+        await pool.query("SELECT pgmq.archive($1, $2::bigint)", [
           QUEUE_NAME,
           msgId,
         ]);
@@ -104,7 +109,7 @@ async function main() {
 
         // Archive stale messages that reference deleted records
         if (errMsg.includes("P2025") || errMsg.includes("not found")) {
-          await client.query("SELECT pgmq.archive($1, $2::bigint)", [
+          await pool.query("SELECT pgmq.archive($1, $2::bigint)", [
             QUEUE_NAME,
             msgId,
           ]);
@@ -120,7 +125,7 @@ async function main() {
     }
   }
 
-  await client.end();
+  await pool.end();
   console.log("[worker] Stopped.");
 }
 

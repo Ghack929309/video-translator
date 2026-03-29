@@ -1,6 +1,6 @@
 FROM --platform=linux/amd64 nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
 
-WORKDIR /workspace
+WORKDIR /app
 
 # 1. System dependencies
 ENV DEBIAN_FRONTEND=noninteractive
@@ -31,13 +31,14 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 6. Bake model weights into the image to eliminate cold start latency
+ENV MODELSCOPE_CACHE="/app/.cache/modelscope"
 COPY scripts/download_model.py scripts/
 RUN python scripts/download_model.py
 
 # 7. Setup runtime
 COPY server.py .
 COPY handler.py .
-ENV PYTHONPATH="/workspace/CosyVoice:/workspace/CosyVoice/third_party/Matcha-TTS"
+ENV PYTHONPATH="/app/CosyVoice:/app/CosyVoice/third_party/Matcha-TTS"
 
 EXPOSE 8000
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]

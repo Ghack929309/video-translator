@@ -777,45 +777,19 @@ export const pipeline = {
 
     // Build an ordered list of audio file paths using ABSOLUTE position tracking.
     // This prevents cumulative drift — each segment is placed at its exact timestamp.
-    const audioParts: string[] = [];
-    let runningPositionMs = 0; // tracks where we are in the output audio timeline
+    const audioParts: { path: string; startMs: number }[] = [];
     for (let i = 0; i < segments.length; i++) {
         const seg = segments[i];
         const segDurationSec = (seg.end - seg.start) / 1000;
+        // Silence gap checking removed: using absolute timestamps handles silence naturally!
         const nextSegStart = i + 1 < segments.length ? segments[i + 1].start : (translation.video.durationSec ?? 0) * 1000;
-        
-        // availableRoom is the exact timeframe until the subsequent speaker physically begins
-        const availableRoomMs = nextSegStart - seg.start;
-        const availableRoomSec = availableRoomMs / 1000;
-
-        // Silence gap: absolute gap checking relative to true audio payload depth
-        const gapMs = seg.start - runningPositionMs;
-        const gapSec = gapMs / 1000;
-
-        if (gapSec > 0.02) {
-          const silencePath = path.join(tmpDir, `silence-${i}.wav`);
-          await ffmpeg.generateSilence(gapSec, silencePath);
-          audioParts.push(silencePath);
-          runningPositionMs += gapMs;
-        } else if (gapSec < -0.05) {
-          console.warn(
-            `[pipeline] Segment ${i} drift warning: ${gapSec.toFixed(3)}s behind audio playhead`,
-          );
-        }
 
         // Generate TTS for the segment
         const rawPath = path.join(tmpDir, `tts-raw-${i}.wav`);
         const stretchedPath = path.join(tmpDir, `tts-stretched-${i}.wav`);
 
-        // Skip empty/whitespace-only segments — insert silence instead of calling TTS
+        // Skip empty/whitespace-only segments — absolute mixing will naturally insert silence
         if (!seg.translatedText || seg.translatedText.trim().length === 0) {
-          console.warn(
-            `[pipeline] Segment ${i}: empty translated text, inserting silence (${segDurationSec.toFixed(1)}s)`,
-          );
-          const emptyPath = path.join(tmpDir, `empty-${i}.wav`);
-          await ffmpeg.generateSilence(Math.max(segDurationSec, 0.1), emptyPath);
-          audioParts.push(emptyPath);
-          runningPositionMs += (Math.max(segDurationSec, 0.1) * 1000); // fluid timestamp extension
           const segProgress = 70 + Math.round((i / segments.length) * 10);
           await updateTranslation(translationId, { progress: segProgress });
           continue;
@@ -828,15 +802,25 @@ export const pipeline = {
             throw new Error(`No voice ref for speaker ${seg.speaker ?? "A"}`);
           }
 
-          // Phase 10: Fluid Pacing. Allow generation at normalized speed arrays.
+          // Phase 10: Absolute Pacing.
           const avgCharsPerSec = 14; 
           const expectedDuration = seg.translatedText.length / avgCharsPerSec;
           
-          // Prosody speed only compresses if it structurally breaks adjacent bounds
-          const prosodySpeed = 
-            expectedDuration > availableRoomSec && availableRoomSec > 0.5
-              ? Math.max(1.0, Math.min(1.5, expectedDuration / availableRoomSec))
-              : 1.0;
+          const lipTimeSec = segDurationSec;
+          let targetSec = lipTimeSec * 1.3; // allow 30% overflow if it sounds natural to prevent chipmunk
+
+          const roomUntilNextSec = (nextSegStart - seg.start) / 1000;
+          
+          // Clamp the target duration. If speakers actually overlap natively (roomUntilNextSec < lipTimeSec),
+          // preserve the lipTimeSec because the overlap is visually intentional.
+          let hardLimitSec = Math.max(lipTimeSec, Math.min(targetSec, roomUntilNextSec));
+          if (hardLimitSec < 0.5) hardLimitSec = 0.5;
+
+          // Accelerate TTS network natively to organically fit inside the limit
+          let prosodySpeed = 1.0;
+          if (expectedDuration > hardLimitSec) {
+             prosodySpeed = Math.min(1.8, expectedDuration / hardLimitSec);
+          }
 
           let audioBuffer: Buffer;
 
@@ -861,33 +845,22 @@ export const pipeline = {
           fs.writeFileSync(rawPath, audioBuffer);
           const actualGeneratedSec = await ffmpeg.getDuration(rawPath);
 
-          // Fluid Time Stretch check
-          if (actualGeneratedSec > availableRoomSec && availableRoomSec > 0.1) {
-            // Audio overflows into the next speaker's lips! Squish it perfectly over the max allowance
+          // Absolute Overrun Check
+          if (actualGeneratedSec > hardLimitSec + 0.1) {
+            // Audio radically overflows its absolute boundary — squash it exactly to the limit
             const { outputPath: finalPath } = await ffmpeg.timeStretchExact(
               rawPath,
-              availableRoomSec,
+              hardLimitSec,
               stretchedPath,
             );
-            audioParts.push(finalPath);
-            runningPositionMs += (availableRoomSec * 1000);
+            audioParts.push({ path: finalPath, startMs: seg.start });
           } else {
-            // Audio fits cleanly within the bounds & gaps! NO distortive stretching!
-            audioParts.push(rawPath);
-            runningPositionMs += (actualGeneratedSec * 1000);
+            // Audio accurately maps perfectly to the lip bounds (or gracefully overflows within permitted margins)
+            audioParts.push({ path: rawPath, startMs: seg.start });
           }
         } catch (err) {
-          console.warn(
-            `[pipeline] TTS failed for segment ${i}, inserting silence: ${err}`,
-          );
-          // Fallback: insert silence matching segment duration
-          const fallbackPath = path.join(tmpDir, `fallback-${i}.wav`);
-          await ffmpeg.generateSilence(
-            Math.max(segDurationSec, 0.1),
-            fallbackPath,
-          );
-          audioParts.push(fallbackPath);
-          runningPositionMs += (Math.max(segDurationSec, 0.1) * 1000);
+          console.warn(`[pipeline] TTS failed for segment ${i}, treating as silence gap.`);
+          // Failed TTS automatically creates a visual gap because no audioPart was pushed.
         }
       // Rate-limit: small delay between TTS calls to avoid hammering API
       if (i < segments.length - 1) {
@@ -901,9 +874,9 @@ export const pipeline = {
       }
     }
 
-    // Concatenate all parts into the final synthesized audio
+    // Absolute Time Mixing
     const synthesizedPath = path.join(tmpDir, "synthesized.wav");
-    await ffmpeg.concatenateAudio(audioParts, synthesizedPath);
+    await ffmpeg.mixAudioAbsolute(audioParts, synthesizedPath, translation.video.durationSec ?? undefined);
 
     // Upload to Tigris
     const audioKey = `translations/${translationId}/synthesized-audio.wav`;

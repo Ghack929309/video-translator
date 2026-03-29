@@ -136,6 +136,16 @@ Plans:
 Plans:
 - [ ] TBD (run /gsd-plan-phase 10 to break down)
 
+### Phase 11: Fix audio pipeline: preserve background sounds, improve multi-speaker sync, and handle TTS failures gracefully
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 10
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 11 to break down)
+
 ---
 
 *Roadmap created: 2026-03-26*

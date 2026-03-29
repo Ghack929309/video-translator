@@ -254,7 +254,7 @@ export const ffmpeg = {
       const padDuration = targetDurationSec - actualDuration;
       const padPath = outputPath + ".pad.wav";
       await this.generateSilence(padDuration, padPath);
-      await this.concatenateAudio([stretchedTmp, padPath], outputPath);
+      await this.mixAudioAbsolute([{ path: stretchedTmp, startMs: 0 }, { path: padPath, startMs: actualDuration * 1000 }], outputPath);
       if (fs.existsSync(stretchedTmp)) fs.unlinkSync(stretchedTmp);
       if (fs.existsSync(padPath)) fs.unlinkSync(padPath);
     }
@@ -354,61 +354,63 @@ export const ffmpeg = {
   },
 
   /**
-   * Concatenate multiple audio files sequentially using an FFmpeg concat list.
-   * Files should already be time-stretched and padded with silence segments.
+   * Mix multiple audio segments accurately at their absolute start times.
+   * Eliminates cascading desynchronization caused by sequential concatenation.
    */
-  async concatenateAudio(
-    audioPaths: string[],
+  async mixAudioAbsolute(
+    audioSegments: { path: string; startMs: number }[],
     outputPath: string,
+    durationSec?: number,
   ): Promise<string> {
-    if (audioPaths.length === 0)
-      throw new Error("No audio files to concatenate");
-    if (audioPaths.length === 1) {
-      // Even for a single file, normalize to 44100Hz mono WAV
-      return new Promise((resolve, reject) => {
-        Ffmpeg(audioPaths[0])
-          .audioChannels(1)
-          .audioFrequency(44100)
-          .format("wav")
-          .on("error", (err) =>
-            reject(new Error(`FFmpeg normalize failed: ${err.message}`)),
-          )
-          .on("end", () => resolve(outputPath))
-          .save(outputPath);
-      });
+    if (audioSegments.length === 0) {
+      await this.generateSilence(durationSec ?? 0.1, outputPath);
+      return outputPath;
     }
 
-    // Use filter_complex concat filter — properly resamples all inputs
-    // to a consistent format before concatenating (unlike -f concat demuxer)
+    if (audioSegments.length === 1 && audioSegments[0].startMs === 0 && !durationSec) {
+      // Just copy it
+      fs.copyFileSync(audioSegments[0].path, outputPath);
+      return outputPath;
+    }
+
     const ffmpegBin = ffmpegPath ?? "ffmpeg";
     const args: string[] = ["-y"];
+    const filterParts: string[] = [];
+    const mixRefs: string[] = [];
 
-    // Add all inputs
-    for (const p of audioPaths) {
-      args.push("-i", p);
+    // Base silent track to guarantee full duration
+    if (durationSec) {
+      args.push("-f", "lavfi", "-t", durationSec.toString(), "-i", "anullsrc=channel_layout=mono:sample_rate=44100");
+      mixRefs.push("[0:a]");
     }
 
-    // Build filter: normalize each input to 44100Hz mono, then concat
-    const filterParts = audioPaths.map(
-      (_, i) =>
-        `[${i}:a]aformat=sample_fmts=s16:sample_rates=44100:channel_layouts=mono[a${i}]`,
-    );
-    const concatInputs = audioPaths.map((_, i) => `[a${i}]`).join("");
-    const filter = [
-      ...filterParts,
-      `${concatInputs}concat=n=${audioPaths.length}:v=0:a=1[out]`,
-    ].join(";");
+    // Add inputs and setup adelay filters
+    audioSegments.forEach((seg, i) => {
+      args.push("-i", seg.path);
+      const inputIdx = durationSec ? i + 1 : i;
+      
+      const delayMs = Math.round(seg.startMs);
+      if (delayMs > 0) {
+        // [1:a]adelay=1000|1000[a1]
+        filterParts.push(`[${inputIdx}:a]adelay=${delayMs}|${delayMs}[a${inputIdx}]`);
+        mixRefs.push(`[a${inputIdx}]`);
+      } else {
+        mixRefs.push(`[${inputIdx}:a]`);
+      }
+    });
 
-    args.push("-filter_complex", filter);
+    const inputsCount = mixRefs.length;
+    // amix duration=longest to avoid cutting off trailing overlaps
+    const filterString = `${filterParts.join(";")}${filterParts.length > 0 ? ";" : ""}${mixRefs.join("")}amix=inputs=${inputsCount}:duration=longest[out]`;
+
+    args.push("-filter_complex", filterString);
     args.push("-map", "[out]");
     args.push("-ac", "1");
     args.push("-ar", "44100");
     args.push("-f", "wav");
     args.push(outputPath);
 
-    console.log(
-      `[ffmpeg] concat: ${audioPaths.length} files via filter_complex`,
-    );
+    console.log(`[ffmpeg] mixAudioAbsolute: ${audioSegments.length} tracks via amix`);
 
     return new Promise((resolve, reject) => {
       const proc = spawn(ffmpegBin, args);
@@ -420,14 +422,12 @@ export const ffmpeg = {
 
       proc.on("close", (code: number | null) => {
         if (code !== 0) {
-          console.error(`[ffmpeg] concat stderr:\n${stderr.slice(-500)}`);
-          reject(new Error(`FFmpeg concat failed with code ${code}`));
+          console.error(`[ffmpeg] amix stderr:\n${stderr.slice(-1000)}`);
+          reject(new Error(`FFmpeg mixAudioAbsolute failed with code ${code}`));
           return;
         }
         const outSize = fs.statSync(outputPath).size;
-        console.log(
-          `[ffmpeg] Concatenated audio: ${(outSize / 1024).toFixed(0)}KB`,
-        );
+        console.log(`[ffmpeg] Mixed absolute audio: ${(outSize / 1024).toFixed(0)}KB`);
         resolve(outputPath);
       });
 

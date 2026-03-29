@@ -18,8 +18,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (env.RUNPOD_POD_ID) {
     try {
       runpodStatus = await runpodApi.getPodStatus(env.RUNPOD_POD_ID);
-    } catch (e) {
-      console.error("Failed to fetch RunPod status", e);
+    } catch (e: any) {
+      console.warn(`[admin] RunPod API unreachable: ${e?.message || "Timeout"}`);
     }
   }
   return { runpodStatus };
