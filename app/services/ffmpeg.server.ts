@@ -41,6 +41,38 @@ export const ffmpeg = {
   },
 
   /**
+   * Extract audio from video at full quality (44.1kHz stereo) for Demucs source separation.
+   * Unlike extractAudio() which produces 16kHz mono for ASR, this preserves quality for AI separation.
+   * Per D-03: Extract from original video's audio stream, not from already-extracted 16kHz mono WAV.
+   */
+  async extractAudioFullQuality(
+    videoPath: string,
+    translationId: string,
+  ): Promise<string> {
+    const outputDir = path.join(os.tmpdir(), "dubly", translationId);
+    fs.mkdirSync(outputDir, { recursive: true });
+    const outputPath = path.join(outputDir, "source-audio-full.wav");
+
+    return new Promise((resolve, reject) => {
+      Ffmpeg(videoPath)
+        .noVideo()
+        .audioChannels(2)
+        .audioFrequency(44100)
+        .format("wav")
+        .on("start", (cmd) => console.log(`[ffmpeg] ${cmd}`))
+        .on("error", (err) =>
+          reject(new Error(`FFmpeg full-quality extract failed: ${err.message}`)),
+        )
+        .on("end", () => {
+          const size = fs.statSync(outputPath).size;
+          console.log(`[ffmpeg] Full-quality audio extracted: ${(size / 1024 / 1024).toFixed(1)}MB (44.1kHz stereo)`);
+          resolve(outputPath);
+        })
+        .save(outputPath);
+    });
+  },
+
+  /**
    * Merge a new audio track onto a video, replacing the original audio.
    * Returns the path to the merged video file.
    */
@@ -182,10 +214,9 @@ export const ffmpeg = {
 
     const rawRatio = currentDuration / targetDurationSec;
 
-    // Clamp: don't speed up beyond 2.5x or slow down beyond 0.4x
-    // Beyond these limits, audio quality degrades severely
-    const MAX_RATIO = 2.5;
-    const MIN_RATIO = 0.4;
+    // Per D-17: Tighter limits for more natural sound. If outside range, truncate with fade-out.
+    const MAX_RATIO = 1.5;
+    const MIN_RATIO = 0.7;
     const clampedRatio = Math.max(MIN_RATIO, Math.min(MAX_RATIO, rawRatio));
 
     if (rawRatio !== clampedRatio) {
