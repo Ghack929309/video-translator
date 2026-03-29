@@ -141,11 +141,11 @@ Plans:
 **Goal:** Overhaul the audio pipeline to preserve background audio via Demucs AI source separation, fix audio/video timing with gap-aware pacing at natural synthesis speed, and make TTS failures non-catastrophic with robust retry logic, pod restart detection, and graceful degradation.
 **Requirements**: BG-01, BG-02, BG-03, TTS-R01, TTS-R02, TTS-R03, TTS-R04, TTS-R05, TTS-R06, TTS-R07, PACE-01, PACE-02, PACE-03, PACE-04, MERGE-01, MERGE-02, MERGE-03, MERGE-04
 **Depends on:** Phase 10
-**Plans:** 4 plans
+**Plans:** 2/4 plans executed
 
 Plans:
-- [ ] 11-01-PLAN.md — Schema migration + CosyVoice FastAPI server (health endpoint, Demucs /separate)
-- [ ] 11-02-PLAN.md — FFmpeg new methods (full-quality extraction, ducking, pre-mix, quality check)
+- [x] 11-01-PLAN.md — Schema migration + CosyVoice FastAPI server (health endpoint, Demucs /separate)
+- [x] 11-02-PLAN.md — FFmpeg new methods (full-quality extraction, ducking, pre-mix, quality check)
 - [ ] 11-03-PLAN.md — CosyVoice TS client overhaul + pipeline rewrite (SEPARATE_AUDIO, SYNTHESIZE, MERGE)
 - [ ] 11-04-PLAN.md — UI changes (background audio toggle, failed segment warning, 8-step progress)
 
