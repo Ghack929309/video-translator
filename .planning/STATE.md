@@ -17,6 +17,7 @@ See: .planning/PROJECT.md (updated 2026-03-26)
 | 2 | Pipeline Integration | Complete |
 | 3 | UI & Speaker Accuracy | Not Started |
 | 4 | Implement the CosyVoice 3 API Service | Not Started |
+| 11 | Fix audio pipeline: preserve background sounds, improve multi-speaker sync, and handle TTS failures gracefully | Not Started |
 
 ## Active Phase
 
@@ -40,6 +41,7 @@ See: .planning/PROJECT.md (updated 2026-03-26)
 - Phase 6 added: RunPod Auto-Scaler and Worker Status UI
 - Phase 9 added: Optimize Pod Scheduling and Lifecycle Safety
 - Phase 10 added: Enhance voice cloning synthesis and merge synchronization
+- Phase 11 added: Fix audio pipeline: preserve background sounds, improve multi-speaker sync, and handle TTS failures gracefully
 
 ---
-*Last updated: 2026-03-27 after phase 10 addition*
+*Last updated: 2026-03-29 after phase 11 addition*
