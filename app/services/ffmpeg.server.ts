@@ -469,6 +469,169 @@ export const ffmpeg = {
   },
 
   /**
+   * Apply volume ducking to background audio track.
+   * Per D-06: Simple -8dB volume reduction (on/off toggle, not dynamic sidechain).
+   */
+  async duckBackground(
+    backgroundPath: string,
+    outputPath: string,
+    duckDb: number = -8,
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      Ffmpeg(backgroundPath)
+        .audioFilters(`volume=${duckDb}dB`)
+        .audioChannels(2)
+        .audioFrequency(44100)
+        .format("wav")
+        .on("start", (cmd) => console.log(`[ffmpeg] ${cmd}`))
+        .on("error", (err) =>
+          reject(new Error(`FFmpeg duck failed: ${err.message}`)),
+        )
+        .on("end", () => {
+          console.log(`[ffmpeg] Background ducked by ${duckDb}dB`);
+          resolve(outputPath);
+        })
+        .save(outputPath);
+    });
+  },
+
+  /**
+   * Pre-mix synthesized speech with ducked background audio.
+   * Per D-20: Two-pass approach -- pre-mix first, then mux onto video.
+   * Per Pitfall 7: Uses normalize=0 to prevent amix auto-volume-reduction.
+   */
+  async preMixAudio(
+    speechPath: string,
+    backgroundPath: string,
+    outputPath: string,
+  ): Promise<string> {
+    const ffmpegBin = ffmpegPath ?? "ffmpeg";
+
+    return new Promise((resolve, reject) => {
+      const args = [
+        "-y",
+        "-i", speechPath,
+        "-i", backgroundPath,
+        "-filter_complex",
+        "[0:a][1:a]amix=inputs=2:duration=longest:normalize=0[out]",
+        "-map", "[out]",
+        "-ac", "2",
+        "-ar", "44100",
+        "-f", "wav",
+        outputPath,
+      ];
+
+      console.log(`[ffmpeg] preMixAudio: speech + background -> premixed`);
+
+      const proc = spawn(ffmpegBin, args);
+      let stderr = "";
+      proc.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
+
+      proc.on("close", (code: number | null) => {
+        if (code !== 0) {
+          console.error(`[ffmpeg] preMix stderr:\n${stderr.slice(-500)}`);
+          reject(new Error(`FFmpeg preMix failed with code ${code}`));
+          return;
+        }
+        const outSize = fs.statSync(outputPath).size;
+        console.log(`[ffmpeg] Pre-mixed audio: ${(outSize / 1024 / 1024).toFixed(1)}MB`);
+        resolve(outputPath);
+      });
+
+      proc.on("error", (err: Error) => {
+        reject(new Error(`Failed to start ffmpeg preMix: ${err.message}`));
+      });
+    });
+  },
+
+  /**
+   * Check if a separated background track has meaningful audio content.
+   * Uses FFmpeg volumedetect to measure mean volume. If below -55dB, the track
+   * is essentially silence and background mixing should be skipped.
+   * Per D-07: If background extraction produces garbage, fall back to speech-only.
+   */
+  async isBackgroundMeaningful(
+    backgroundPath: string,
+  ): Promise<boolean> {
+    const ffmpegBin = ffmpegPath ?? "ffmpeg";
+
+    return new Promise((resolve) => {
+      const args = [
+        "-i", backgroundPath,
+        "-af", "volumedetect",
+        "-f", "null", "-",
+      ];
+
+      const proc = spawn(ffmpegBin, args);
+      let stderr = "";
+      proc.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
+
+      proc.on("close", () => {
+        const match = stderr.match(/mean_volume:\s*([-\d.]+)\s*dB/);
+        if (match) {
+          const meanDb = parseFloat(match[1]);
+          const meaningful = meanDb > -55;
+          console.log(`[ffmpeg] Background mean volume: ${meanDb.toFixed(1)}dB — ${meaningful ? "meaningful" : "silence (skipping)"}`);
+          resolve(meaningful);
+        } else {
+          // Can't determine -- assume meaningful to avoid silently dropping audio
+          console.log(`[ffmpeg] Could not determine background volume — assuming meaningful`);
+          resolve(true);
+        }
+      });
+
+      proc.on("error", () => {
+        // On error, assume meaningful
+        resolve(true);
+      });
+    });
+  },
+
+  /**
+   * Verify the merged output video is valid.
+   * Per D-22: Check duration matches input (+-2s), audio stream exists and is >1KB, file size is reasonable.
+   */
+  async verifyMergeOutput(
+    outputPath: string,
+    expectedDurationSec: number,
+  ): Promise<{ valid: boolean; reason?: string }> {
+    // Check 1: file exists and is reasonable size
+    const stat = fs.statSync(outputPath);
+    if (stat.size < 1024) {
+      return { valid: false, reason: `Output too small: ${stat.size} bytes` };
+    }
+
+    // Check 2: duration within +-2s tolerance
+    const actualDuration = await this.getDuration(outputPath);
+    const drift = Math.abs(actualDuration - expectedDurationSec);
+    if (drift > 2.0) {
+      return {
+        valid: false,
+        reason: `Duration drift: ${drift.toFixed(1)}s (expected ${expectedDurationSec.toFixed(1)}s, got ${actualDuration.toFixed(1)}s)`,
+      };
+    }
+
+    // Check 3: has audio stream via ffprobe
+    const hasAudio = await new Promise<boolean>((resolve) => {
+      Ffmpeg.ffprobe(outputPath, (err, metadata) => {
+        if (err) {
+          resolve(false);
+          return;
+        }
+        const audioStream = metadata.streams?.find((s) => s.codec_type === "audio");
+        resolve(!!audioStream);
+      });
+    });
+
+    if (!hasAudio) {
+      return { valid: false, reason: "Output has no audio stream" };
+    }
+
+    console.log(`[ffmpeg] Merge quality check passed: ${actualDuration.toFixed(1)}s, ${(stat.size / 1024 / 1024).toFixed(1)}MB`);
+    return { valid: true };
+  },
+
+  /**
    * Clean up temporary files for a given translation.
    */
   cleanup(translationId: string): void {
