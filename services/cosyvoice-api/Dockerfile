@@ -30,6 +30,9 @@ RUN pip install --no-cache-dir -r CosyVoice/requirements.txt
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Pre-download Demucs htdemucs model weights to avoid first-run latency
+RUN python -c "import demucs.api; demucs.api.Separator(model='htdemucs')"
+
 # 6. Bake model weights into the image to eliminate cold start latency
 ENV MODELSCOPE_CACHE="/app/.cache/modelscope"
 COPY scripts/download_model.py scripts/

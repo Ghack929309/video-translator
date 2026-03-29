@@ -15,3 +15,10 @@ print(f"Model physically baked to {MODEL_DIR}")
 # Pre-download Chinese text normalization FST models to eliminate runtime ModelScope fetches
 ms_download("pengzhendong/wetext")
 print("WeText normalization FST models physically baked to cache.")
+
+# Pre-download Demucs htdemucs model for audio source separation
+print("Pre-downloading Demucs htdemucs model...")
+import demucs.api
+_sep = demucs.api.Separator(model="htdemucs")
+del _sep
+print("Demucs htdemucs model baked to cache.")
