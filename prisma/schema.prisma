@@ -46,6 +46,10 @@ model Translation {
   transcriptJson      Json?
   translatedJson      Json?
   synthesizedAudioKey String?
+  backgroundAudioKey  String?
+  enableBackgroundMix Boolean           @default(true)
+  failedSegments      Json?
+  failedSegmentCount  Int               @default(0)
   resultVideoKey      String?
   fishAudioVoiceId    String?
   fishAudioVoiceMap   Json?
@@ -81,6 +85,7 @@ enum TranslationStatus {
 enum PipelineStep {
   DOWNLOAD
   EXTRACT_AUDIO
+  SEPARATE_AUDIO
   TRANSCRIBE
   TRANSLATE
   CLONE_VOICE

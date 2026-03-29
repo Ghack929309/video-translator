@@ -41,6 +41,7 @@ export type TranslationStatus = (typeof TranslationStatus)[keyof typeof Translat
 export const PipelineStep = {
   DOWNLOAD: 'DOWNLOAD',
   EXTRACT_AUDIO: 'EXTRACT_AUDIO',
+  SEPARATE_AUDIO: 'SEPARATE_AUDIO',
   TRANSCRIBE: 'TRANSCRIBE',
   TRANSLATE: 'TRANSLATE',
   CLONE_VOICE: 'CLONE_VOICE',
