@@ -138,15 +138,18 @@ Plans:
 
 ### Phase 11: Fix audio pipeline: preserve background sounds, improve multi-speaker sync, and handle TTS failures gracefully
 
-**Goal:** [To be planned]
-**Requirements**: TBD
+**Goal:** Overhaul the audio pipeline to preserve background audio via Demucs AI source separation, fix audio/video timing with gap-aware pacing at natural synthesis speed, and make TTS failures non-catastrophic with robust retry logic, pod restart detection, and graceful degradation.
+**Requirements**: BG-01, BG-02, BG-03, TTS-R01, TTS-R02, TTS-R03, TTS-R04, TTS-R05, TTS-R06, TTS-R07, PACE-01, PACE-02, PACE-03, PACE-04, MERGE-01, MERGE-02, MERGE-03, MERGE-04
 **Depends on:** Phase 10
-**Plans:** 0 plans
+**Plans:** 4 plans
 
 Plans:
-- [ ] TBD (run /gsd:plan-phase 11 to break down)
+- [ ] 11-01-PLAN.md — Schema migration + CosyVoice FastAPI server (health endpoint, Demucs /separate)
+- [ ] 11-02-PLAN.md — FFmpeg new methods (full-quality extraction, ducking, pre-mix, quality check)
+- [ ] 11-03-PLAN.md — CosyVoice TS client overhaul + pipeline rewrite (SEPARATE_AUDIO, SYNTHESIZE, MERGE)
+- [ ] 11-04-PLAN.md — UI changes (background audio toggle, failed segment warning, 8-step progress)
 
 ---
 
 *Roadmap created: 2026-03-26*
-*Last updated: 2026-03-26 after initial creation*
+*Last updated: 2026-03-29 after phase 11 planning*
