@@ -18,7 +18,7 @@ print("WeText normalization FST models physically baked to cache.")
 
 # Pre-download Demucs htdemucs model for audio source separation
 print("Pre-downloading Demucs htdemucs model...")
-import demucs.api
-_sep = demucs.api.Separator(model="htdemucs")
+from demucs.api import Separator
+_sep = Separator(model="htdemucs")
 del _sep
 print("Demucs htdemucs model baked to cache.")

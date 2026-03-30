@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 
 import torch
 import torchaudio
-import demucs.api
+from demucs.api import Separator
 
 # ── Dynamic Path Resolution (Works in Docker and Locally) ────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -34,7 +34,7 @@ def get_demucs_separator():
     global DEMUCS_SEPARATOR
     if DEMUCS_SEPARATOR is None:
         print("[demucs] Loading htdemucs model...")
-        DEMUCS_SEPARATOR = demucs.api.Separator(model="htdemucs", device="cuda")
+        DEMUCS_SEPARATOR = Separator(model="htdemucs", device="cuda")
         print("[demucs] htdemucs model loaded.")
     return DEMUCS_SEPARATOR
 
