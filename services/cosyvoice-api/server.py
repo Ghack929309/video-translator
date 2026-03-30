@@ -41,17 +41,37 @@ os.makedirs(DEMUCS_OUTPUT_BASE, exist_ok=True)
 
 
 def _run_demucs_task(task_id: str, input_path: str, work_dir: str):
-    """Run demucs in a background thread and store the result."""
+    """Run demucs in a background thread and store the result.
+    Tries GPU first (fast, ~30s), falls back to CPU if CUDA fails."""
     output_dir = os.path.join(DEMUCS_OUTPUT_BASE, task_id)
     os.makedirs(output_dir, exist_ok=True)
     demucs_out = os.path.join(work_dir, "out")
 
     try:
+        # Try GPU first — much faster (~30s vs 5-10min on CPU)
+        print(f"[demucs] Task {task_id}: attempting GPU (cuda)...")
         result = subprocess.run(
             ["python", "-m", "demucs", "-n", "htdemucs", "--two-stems=vocals",
-             "-d", "cpu", "-o", demucs_out, input_path],
-            capture_output=True, text=True, timeout=600,
+             "-d", "cuda", "-o", demucs_out, input_path],
+            capture_output=True, text=True, timeout=300,
         )
+
+        # If GPU fails (CUDA kernel mismatch, OOM, etc.), fall back to CPU
+        if result.returncode != 0:
+            gpu_err = result.stderr[-300:] if result.stderr else "unknown error"
+            print(f"[demucs] Task {task_id}: GPU failed ({gpu_err}), falling back to CPU...")
+
+            # Clean up any partial GPU output
+            if os.path.exists(demucs_out):
+                shutil.rmtree(demucs_out)
+
+            result = subprocess.run(
+                ["python", "-m", "demucs", "-n", "htdemucs", "--two-stems=vocals",
+                 "-d", "cpu", "--segment", "30", "-j", "2",
+                 "-o", demucs_out, input_path],
+                capture_output=True, text=True, timeout=900,
+            )
+
         if result.returncode != 0:
             raise RuntimeError(f"Demucs CLI failed: {result.stderr[-500:]}")
 

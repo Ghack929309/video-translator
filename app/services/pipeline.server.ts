@@ -888,6 +888,18 @@ export const pipeline = {
         `[pipeline] Step SYNTHESIZE — generating ${segments.length} TTS segments (engine: ${isCosyVoice ? "CosyVoice" : "Fish Audio"})`,
       );
 
+      // Debug: log the segment timeline
+      for (let i = 0; i < Math.min(segments.length, 10); i++) {
+        const s = segments[i];
+        console.log(
+          `[pipeline] Segment ${i}: start=${(s.start / 1000).toFixed(1)}s end=${(s.end / 1000).toFixed(1)}s ` +
+          `dur=${((s.end - s.start) / 1000).toFixed(1)}s text="${s.translatedText.slice(0, 60)}..."`,
+        );
+      }
+      if (segments.length > 10) {
+        console.log(`[pipeline] ... and ${segments.length - 10} more segments`);
+      }
+
       fs.mkdirSync(tmpDir, { recursive: true });
 
       // Per D-13: Track failed segments

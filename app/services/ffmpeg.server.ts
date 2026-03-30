@@ -281,13 +281,22 @@ export const ffmpeg = {
           .save(outputPath);
       });
     } else {
-      // Pad with silence to reach exact target
-      const padDuration = targetDurationSec - actualDuration;
-      const padPath = outputPath + ".pad.wav";
-      await this.generateSilence(padDuration, padPath);
-      await this.mixAudioAbsolute([{ path: stretchedTmp, startMs: 0 }, { path: padPath, startMs: actualDuration * 1000 }], outputPath);
-      if (fs.existsSync(stretchedTmp)) fs.unlinkSync(stretchedTmp);
-      if (fs.existsSync(padPath)) fs.unlinkSync(padPath);
+      // Pad with silence to reach exact target using apad filter
+      await new Promise<void>((resolve, reject) => {
+        Ffmpeg(stretchedTmp)
+          .audioFilters(`apad=whole_dur=${targetDurationSec.toFixed(3)}`)
+          .audioChannels(1)
+          .audioFrequency(44100)
+          .format("wav")
+          .on("error", (err) =>
+            reject(new Error(`FFmpeg pad failed: ${err.message}`)),
+          )
+          .on("end", () => {
+            if (fs.existsSync(stretchedTmp)) fs.unlinkSync(stretchedTmp);
+            resolve();
+          })
+          .save(outputPath);
+      });
     }
 
     return { outputPath, stretchRatio: clampedRatio };
@@ -398,52 +407,88 @@ export const ffmpeg = {
       return outputPath;
     }
 
-    if (audioSegments.length === 1 && audioSegments[0].startMs === 0 && !durationSec) {
-      // Just copy it
-      fs.copyFileSync(audioSegments[0].path, outputPath);
-      return outputPath;
+    // Sort by start time to build the timeline sequentially
+    const sorted = [...audioSegments].sort((a, b) => a.startMs - b.startMs);
+
+    // Log the timeline for debugging
+    for (const seg of sorted) {
+      const dur = await this.getDuration(seg.path);
+      console.log(
+        `[ffmpeg] Timeline: segment at ${(seg.startMs / 1000).toFixed(1)}s, duration ${dur.toFixed(2)}s`,
+      );
     }
 
     const ffmpegBin = ffmpegPath ?? "ffmpeg";
-    const args: string[] = ["-y"];
-    const filterParts: string[] = [];
-    const mixRefs: string[] = [];
+    const totalDurationSec = durationSec ?? 0;
 
-    // Base silent track to guarantee full duration
-    if (durationSec) {
-      args.push("-f", "lavfi", "-t", durationSec.toString(), "-i", "anullsrc=channel_layout=mono:sample_rate=44100");
-      mixRefs.push("[0:a]");
+    // Build sequential timeline: silence gaps + audio segments concatenated in order
+    // This avoids amix volume normalization (1/N) and is more reliable than adelay+amix
+    const concatParts: string[] = []; // file paths to concatenate
+    const tmpDir = path.dirname(outputPath);
+    let cursor = 0; // current position in ms
+
+    for (let i = 0; i < sorted.length; i++) {
+      const seg = sorted[i];
+      const gapMs = seg.startMs - cursor;
+
+      // Insert silence for the gap before this segment
+      if (gapMs > 50) {
+        // Only insert gap if > 50ms (avoid tiny silence files)
+        const silPath = path.join(tmpDir, `gap-${i}.wav`);
+        await this.generateSilence(gapMs / 1000, silPath);
+        concatParts.push(silPath);
+        cursor += gapMs;
+      } else if (gapMs < -50) {
+        // Segments overlap — trim the overlap from the start of this segment
+        console.warn(`[ffmpeg] Segments overlap by ${Math.abs(gapMs)}ms at ${seg.startMs}ms — trimming`);
+      }
+
+      concatParts.push(seg.path);
+      const segDur = await this.getDuration(seg.path);
+      cursor = seg.startMs + Math.round(segDur * 1000);
     }
 
-    // Add inputs and setup adelay filters
-    audioSegments.forEach((seg, i) => {
-      args.push("-i", seg.path);
-      const inputIdx = durationSec ? i + 1 : i;
-      
-      const delayMs = Math.round(seg.startMs);
-      if (delayMs > 0) {
-        // [1:a]adelay=1000|1000[a1]
-        filterParts.push(`[${inputIdx}:a]adelay=${delayMs}|${delayMs}[a${inputIdx}]`);
-        mixRefs.push(`[a${inputIdx}]`);
-      } else {
-        mixRefs.push(`[${inputIdx}:a]`);
+    // Pad with silence to reach the video's total duration
+    if (totalDurationSec > 0) {
+      const remainingMs = totalDurationSec * 1000 - cursor;
+      if (remainingMs > 100) {
+        const tailSilPath = path.join(tmpDir, "gap-tail.wav");
+        await this.generateSilence(remainingMs / 1000, tailSilPath);
+        concatParts.push(tailSilPath);
       }
-    });
+    }
 
-    const inputsCount = mixRefs.length;
-    // amix duration=longest to avoid cutting off trailing overlaps
-    const filterString = `${filterParts.join(";")}${filterParts.length > 0 ? ";" : ""}${mixRefs.join("")}amix=inputs=${inputsCount}:duration=longest[out]`;
+    if (concatParts.length === 0) {
+      await this.generateSilence(totalDurationSec || 0.1, outputPath);
+      return outputPath;
+    }
 
-    args.push("-filter_complex", filterString);
-    args.push("-map", "[out]");
-    args.push("-ac", "1");
-    args.push("-ar", "44100");
-    args.push("-f", "wav");
-    args.push(outputPath);
+    if (concatParts.length === 1) {
+      fs.copyFileSync(concatParts[0], outputPath);
+      return outputPath;
+    }
 
-    console.log(`[ffmpeg] mixAudioAbsolute: ${audioSegments.length} tracks via amix`);
+    // Use FFmpeg concat demuxer for reliable sequential joining
+    const listPath = path.join(tmpDir, "concat-list.txt");
+    const listContent = concatParts
+      .map((p) => `file '${p.replace(/'/g, "'\\''")}'`)
+      .join("\n");
+    fs.writeFileSync(listPath, listContent);
+
+    console.log(`[ffmpeg] mixAudioAbsolute: ${sorted.length} segments + gaps via concat (${concatParts.length} parts)`);
 
     return new Promise((resolve, reject) => {
+      const args = [
+        "-y",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", listPath,
+        "-ac", "1",
+        "-ar", "44100",
+        "-f", "wav",
+        outputPath,
+      ];
+
       const proc = spawn(ffmpegBin, args);
       let stderr = "";
 
@@ -452,13 +497,22 @@ export const ffmpeg = {
       });
 
       proc.on("close", (code: number | null) => {
+        // Clean up gap files
+        concatParts.forEach((p) => {
+          if (p.includes("gap-")) {
+            try { fs.unlinkSync(p); } catch {}
+          }
+        });
+        try { fs.unlinkSync(listPath); } catch {}
+
         if (code !== 0) {
-          console.error(`[ffmpeg] amix stderr:\n${stderr.slice(-1000)}`);
+          console.error(`[ffmpeg] concat stderr:\n${stderr.slice(-1000)}`);
           reject(new Error(`FFmpeg mixAudioAbsolute failed with code ${code}`));
           return;
         }
         const outSize = fs.statSync(outputPath).size;
-        console.log(`[ffmpeg] Mixed absolute audio: ${(outSize / 1024).toFixed(0)}KB`);
+        const outDur = outSize / (44100 * 2); // rough estimate for 16-bit mono
+        console.log(`[ffmpeg] Mixed audio: ${(outSize / 1024).toFixed(0)}KB (~${outDur.toFixed(1)}s)`);
         resolve(outputPath);
       });
 
