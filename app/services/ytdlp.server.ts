@@ -6,6 +6,7 @@ import * as fs from "fs";
 interface DownloadResult {
   filePath: string;
   mimeType: string;
+  title: string | null;
 }
 
 /**
@@ -29,18 +30,22 @@ export const ytdlp = {
         "bv*[ext=mp4][height<=1080]+ba[ext=m4a]/bv*+ba/b",
         "--merge-output-format",
         "mp4",
+        "--print", "title",
+        "--no-simulate",
         "--output",
         outputTemplate,
         url,
       ]);
 
       let stderr = "";
+      let stdout = "";
 
       proc.stderr.on("data", (data) => {
         stderr += data.toString();
       });
 
       proc.stdout.on("data", (data) => {
+        stdout += data.toString();
         console.log(`[yt-dlp] ${data.toString().trim()}`);
       });
 
@@ -59,9 +64,13 @@ export const ytdlp = {
           return;
         }
 
+        // --print title outputs the title as the first line of stdout
+        const title = stdout.split("\n")[0]?.trim() || null;
+
         resolve({
           filePath: path.join(outputDir, sourceFile),
           mimeType: "video/mp4",
+          title,
         });
       });
 

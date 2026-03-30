@@ -291,7 +291,7 @@ export const pipeline = {
     console.log(
       `[pipeline] Step DOWNLOAD — downloading from ${video.sourceUrl}`,
     );
-    const { filePath, mimeType } = await ytdlp.download(
+    const { filePath, mimeType, title: videoTitle } = await ytdlp.download(
       video.sourceUrl,
       video.id,
     );
@@ -301,14 +301,20 @@ export const pipeline = {
     const fileBuffer = fs.readFileSync(filePath);
     await tigris.upload(storageKey, fileBuffer, mimeType);
 
-    // Update video record with storage key
+    // Update video record with storage key and real title from source
+    const updateData: Record<string, unknown> = {
+      storageKey,
+      mimeType,
+      fileSizeBytes: fileBuffer.length,
+    };
+    // Replace placeholder title with the real video title from yt-dlp
+    if (videoTitle) {
+      updateData.title = videoTitle;
+      console.log(`[pipeline] Video title from source: "${videoTitle}"`);
+    }
     await db.video.update({
       where: { id: video.id },
-      data: {
-        storageKey,
-        mimeType,
-        fileSizeBytes: fileBuffer.length,
-      },
+      data: updateData,
     });
 
     // Clean up downloaded file

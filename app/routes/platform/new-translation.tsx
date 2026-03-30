@@ -110,6 +110,11 @@ export default function NewTranslationPage() {
 
   const upload = useUpload();
 
+  // Auto-fill title from uploaded filename (strip extension)
+  const autoTitleFromFile = upload.fileName
+    ? upload.fileName.replace(/\.[^.]+$/, "")
+    : null;
+
   // If engine changes, validate selected language
   const handleEngineChange = (newEngine: "FISH_AUDIO" | "COSYVOICE") => {
     setEngine(newEngine);
@@ -236,7 +241,7 @@ export default function NewTranslationPage() {
               <Input
                 id="title"
                 name="title"
-                placeholder="My Product Demo"
+                placeholder={autoTitleFromFile ?? "My Product Demo"}
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
               />
@@ -248,7 +253,7 @@ export default function NewTranslationPage() {
             <input
               type="hidden"
               name="title"
-              value={title || (upload.fileName ?? "Untitled Video")}
+              value={title || autoTitleFromFile || "Untitled Video"}
             />
             <input
               type="hidden"
