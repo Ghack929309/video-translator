@@ -407,11 +407,13 @@ export const ffmpeg = {
       return outputPath;
     }
 
-    // Sort by start time to build the timeline sequentially
-    const sorted = [...audioSegments].sort((a, b) => a.startMs - b.startMs);
+    if (audioSegments.length === 1 && audioSegments[0].startMs === 0 && !durationSec) {
+      fs.copyFileSync(audioSegments[0].path, outputPath);
+      return outputPath;
+    }
 
     // Log the timeline for debugging
-    for (const seg of sorted) {
+    for (const seg of audioSegments) {
       const dur = await this.getDuration(seg.path);
       console.log(
         `[ffmpeg] Timeline: segment at ${(seg.startMs / 1000).toFixed(1)}s, duration ${dur.toFixed(2)}s`,
@@ -419,76 +421,49 @@ export const ffmpeg = {
     }
 
     const ffmpegBin = ffmpegPath ?? "ffmpeg";
-    const totalDurationSec = durationSec ?? 0;
+    const args: string[] = ["-y"];
+    const filterParts: string[] = [];
+    const mixRefs: string[] = [];
 
-    // Build sequential timeline: silence gaps + audio segments concatenated in order
-    // This avoids amix volume normalization (1/N) and is more reliable than adelay+amix
-    const concatParts: string[] = []; // file paths to concatenate
-    const tmpDir = path.dirname(outputPath);
-    let cursor = 0; // current position in ms
+    // Base silent track to guarantee full duration and correct output length
+    if (durationSec) {
+      args.push("-f", "lavfi", "-t", durationSec.toString(), "-i", "anullsrc=channel_layout=mono:sample_rate=44100");
+      mixRefs.push("[0:a]");
+    }
 
-    for (let i = 0; i < sorted.length; i++) {
-      const seg = sorted[i];
-      const gapMs = seg.startMs - cursor;
+    // Add each segment as an input with adelay positioning.
+    // FFmpeg's filter graph automatically resamples all inputs to a common format,
+    // so TTS at 22kHz and silence at 44.1kHz are handled correctly.
+    audioSegments.forEach((seg, i) => {
+      args.push("-i", seg.path);
+      const inputIdx = durationSec ? i + 1 : i;
 
-      // Insert silence for the gap before this segment
-      if (gapMs > 50) {
-        // Only insert gap if > 50ms (avoid tiny silence files)
-        const silPath = path.join(tmpDir, `gap-${i}.wav`);
-        await this.generateSilence(gapMs / 1000, silPath);
-        concatParts.push(silPath);
-        cursor += gapMs;
-      } else if (gapMs < -50) {
-        // Segments overlap — trim the overlap from the start of this segment
-        console.warn(`[ffmpeg] Segments overlap by ${Math.abs(gapMs)}ms at ${seg.startMs}ms — trimming`);
+      const delayMs = Math.round(seg.startMs);
+      if (delayMs > 0) {
+        filterParts.push(`[${inputIdx}:a]adelay=${delayMs}|${delayMs}[a${inputIdx}]`);
+        mixRefs.push(`[a${inputIdx}]`);
+      } else {
+        mixRefs.push(`[${inputIdx}:a]`);
       }
+    });
 
-      concatParts.push(seg.path);
-      const segDur = await this.getDuration(seg.path);
-      cursor = seg.startMs + Math.round(segDur * 1000);
-    }
+    const inputsCount = mixRefs.length;
+    // normalize=0 preserves original volume (fixes the 1/N volume division bug)
+    // dropout_transition=0 prevents volume ramp when inputs end
+    const filterString =
+      `${filterParts.join(";")}${filterParts.length > 0 ? ";" : ""}` +
+      `${mixRefs.join("")}amix=inputs=${inputsCount}:duration=longest:normalize=0:dropout_transition=0[out]`;
 
-    // Pad with silence to reach the video's total duration
-    if (totalDurationSec > 0) {
-      const remainingMs = totalDurationSec * 1000 - cursor;
-      if (remainingMs > 100) {
-        const tailSilPath = path.join(tmpDir, "gap-tail.wav");
-        await this.generateSilence(remainingMs / 1000, tailSilPath);
-        concatParts.push(tailSilPath);
-      }
-    }
+    args.push("-filter_complex", filterString);
+    args.push("-map", "[out]");
+    args.push("-ac", "1");
+    args.push("-ar", "44100");
+    args.push("-f", "wav");
+    args.push(outputPath);
 
-    if (concatParts.length === 0) {
-      await this.generateSilence(totalDurationSec || 0.1, outputPath);
-      return outputPath;
-    }
-
-    if (concatParts.length === 1) {
-      fs.copyFileSync(concatParts[0], outputPath);
-      return outputPath;
-    }
-
-    // Use FFmpeg concat demuxer for reliable sequential joining
-    const listPath = path.join(tmpDir, "concat-list.txt");
-    const listContent = concatParts
-      .map((p) => `file '${p.replace(/'/g, "'\\''")}'`)
-      .join("\n");
-    fs.writeFileSync(listPath, listContent);
-
-    console.log(`[ffmpeg] mixAudioAbsolute: ${sorted.length} segments + gaps via concat (${concatParts.length} parts)`);
+    console.log(`[ffmpeg] mixAudioAbsolute: ${audioSegments.length} segments via adelay+amix (normalize=0)`);
 
     return new Promise((resolve, reject) => {
-      const args = [
-        "-y",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", listPath,
-        "-ac", "1",
-        "-ar", "44100",
-        "-f", "wav",
-        outputPath,
-      ];
-
       const proc = spawn(ffmpegBin, args);
       let stderr = "";
 
@@ -497,22 +472,13 @@ export const ffmpeg = {
       });
 
       proc.on("close", (code: number | null) => {
-        // Clean up gap files
-        concatParts.forEach((p) => {
-          if (p.includes("gap-")) {
-            try { fs.unlinkSync(p); } catch {}
-          }
-        });
-        try { fs.unlinkSync(listPath); } catch {}
-
         if (code !== 0) {
-          console.error(`[ffmpeg] concat stderr:\n${stderr.slice(-1000)}`);
+          console.error(`[ffmpeg] amix stderr:\n${stderr.slice(-1000)}`);
           reject(new Error(`FFmpeg mixAudioAbsolute failed with code ${code}`));
           return;
         }
         const outSize = fs.statSync(outputPath).size;
-        const outDur = outSize / (44100 * 2); // rough estimate for 16-bit mono
-        console.log(`[ffmpeg] Mixed audio: ${(outSize / 1024).toFixed(0)}KB (~${outDur.toFixed(1)}s)`);
+        console.log(`[ffmpeg] Mixed absolute audio: ${(outSize / 1024).toFixed(0)}KB`);
         resolve(outputPath);
       });
 

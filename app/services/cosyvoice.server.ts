@@ -243,12 +243,11 @@ export const cosyvoice = {
     // Per D-15: Always synthesize at speed=1.0. Do NOT use speed parameter for pacing.
     const clampedSpeed = 1.0;
 
-    // CosyVoice demands explicit linguistic tokenization markers for cross-lingual zero-shot
-    const finalText = `<|${targetLanguage}|>${text}`;
-
     // Choose path: direct pod (fast) or RunPod Serverless (queued)
     if (env.RUNPOD_POD_ID) {
-      return this.synthesizeViaPod(finalText, promptWavPath, mode, clampedSpeed, targetLanguage, promptText);
+      // Pod's FastAPI server handles text formatting (adds <|endofprompt|> prefix).
+      // Do NOT add language tags here — the server does it.
+      return this.synthesizeViaPod(text, promptWavPath, mode, clampedSpeed, targetLanguage, promptText);
     }
 
     if (!env.COSYVOICE_URL || !env.RUNPOD_API_KEY) {
@@ -257,6 +256,8 @@ export const cosyvoice = {
       );
     }
 
+    // Serverless handler expects pre-formatted text with language tag
+    const finalText = `<|${targetLanguage}|>${text}`;
     return this.synthesizeViaServerless(finalText, promptWavPath, mode, clampedSpeed, targetLanguage, promptText);
   },
 
