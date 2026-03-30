@@ -30,12 +30,13 @@ RUN pip install --no-cache-dir -r CosyVoice/requirements.txt
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pin transformers to a version compatible with the PyTorch from CosyVoice deps
-# (newer transformers uses torch.compiler which requires PyTorch 2.1+)
-RUN pip install --no-cache-dir "transformers<4.46"
-
-# Pre-download Demucs htdemucs model weights to avoid first-run latency
-RUN python -c "from demucs.api import Separator; Separator(model='htdemucs')"
+# Pre-download Demucs htdemucs model weights via CLI to avoid first-run latency
+# (demucs 4.0.1 doesn't have demucs.api, so we use the CLI which triggers model download)
+RUN python -m demucs --help > /dev/null 2>&1 && \
+    mkdir -p /tmp/demucs_warmup && \
+    ffmpeg -f lavfi -i "sine=frequency=440:duration=3" -ar 44100 -ac 2 /tmp/demucs_warmup/test.wav && \
+    python -m demucs -n htdemucs --two-stems=vocals -o /tmp/demucs_warmup/out /tmp/demucs_warmup/test.wav && \
+    rm -rf /tmp/demucs_warmup
 
 # 6. Bake model weights into the image to eliminate cold start latency
 ENV MODELSCOPE_CACHE="/app/.cache/modelscope"

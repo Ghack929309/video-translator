@@ -4,13 +4,14 @@ import tempfile
 import traceback
 import io
 import base64
+import subprocess
+import shutil
 
 from fastapi import FastAPI, UploadFile, Form, File, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
 
 import torch
 import torchaudio
-from demucs.api import Separator
 
 # ── Dynamic Path Resolution (Works in Docker and Locally) ────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,16 +28,7 @@ app = FastAPI(title="CosyVoice 3 API Service")
 # ── Readiness Gate ─────────────────────────────────────────────────────────
 READY = False
 
-# ── Demucs Separator (Lazy Singleton) ──────────────────────────────────────
-DEMUCS_SEPARATOR = None
-
-def get_demucs_separator():
-    global DEMUCS_SEPARATOR
-    if DEMUCS_SEPARATOR is None:
-        print("[demucs] Loading htdemucs model...")
-        DEMUCS_SEPARATOR = Separator(model="htdemucs", device="cuda")
-        print("[demucs] htdemucs model loaded.")
-    return DEMUCS_SEPARATOR
+# ── Demucs via CLI subprocess ─────────────────────────────────────────────
 
 # ── Model Loading (Singleton) ─────────────────────────────────────────────
 
@@ -84,43 +76,55 @@ def health_check():
 
 @app.post("/separate")
 async def separate_audio(audio: UploadFile = File(...)):
-    """Separate audio into vocals and background using Demucs htdemucs (per D-01, D-02)."""
-    fd, temp_path = tempfile.mkstemp(suffix=".wav")
-    os.close(fd)
+    """Separate audio into vocals and background using Demucs htdemucs CLI (per D-01, D-02)."""
+    work_dir = tempfile.mkdtemp(prefix="demucs_")
+    input_path = os.path.join(work_dir, "input.wav")
+    out_dir = os.path.join(work_dir, "out")
 
     try:
-        with open(temp_path, "wb") as f:
+        with open(input_path, "wb") as f:
             f.write(await audio.read())
 
-        separator = get_demucs_separator()
-        origin, separated = separator.separate_audio_file(temp_path)
+        # Run demucs CLI: --two-stems=vocals splits into vocals + no_vocals (background)
+        result = subprocess.run(
+            ["python", "-m", "demucs", "-n", "htdemucs", "--two-stems=vocals",
+             "-o", out_dir, input_path],
+            capture_output=True, text=True, timeout=300,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Demucs CLI failed: {result.stderr}")
 
-        # htdemucs outputs: drums, bass, other, vocals
-        # "background" = everything except vocals (per D-01)
-        vocals = separated["vocals"]
-        background = separated["drums"] + separated["bass"] + separated["other"]
+        # demucs outputs to: out_dir/htdemucs/input/vocals.wav and no_vocals.wav
+        stem_dir = os.path.join(out_dir, "htdemucs", "input")
+        vocals_path = os.path.join(stem_dir, "vocals.wav")
+        bg_path = os.path.join(stem_dir, "no_vocals.wav")
 
-        # Encode background to WAV bytes
+        if not os.path.exists(vocals_path) or not os.path.exists(bg_path):
+            raise RuntimeError(f"Demucs output missing. Dir contents: {os.listdir(stem_dir) if os.path.exists(stem_dir) else 'stem_dir not found'}")
+
+        # Read output files and get sample rate
+        bg_wav, bg_sr = torchaudio.load(bg_path)
+        vocals_wav, _ = torchaudio.load(vocals_path)
+
+        # Encode to base64
         bg_io = io.BytesIO()
-        torchaudio.save(bg_io, background.cpu(), separator.samplerate, format="wav")
+        torchaudio.save(bg_io, bg_wav, bg_sr, format="wav")
         bg_bytes = bg_io.getvalue()
 
-        # Encode vocals to WAV bytes
         vocals_io = io.BytesIO()
-        torchaudio.save(vocals_io, vocals.cpu(), separator.samplerate, format="wav")
+        torchaudio.save(vocals_io, vocals_wav, bg_sr, format="wav")
         vocals_bytes = vocals_io.getvalue()
 
         return JSONResponse({
             "background": base64.b64encode(bg_bytes).decode("ascii"),
             "vocals": base64.b64encode(vocals_bytes).decode("ascii"),
-            "sample_rate": separator.samplerate,
+            "sample_rate": bg_sr,
         })
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Demucs separation failed: {str(e)}")
     finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 @app.post("/synthesize")
