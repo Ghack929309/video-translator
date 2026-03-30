@@ -8,7 +8,15 @@ export const QUEUE_NAME = "translation_process";
  * Uses DIRECT_DATABASE_URL (port 5432) — not the pooler.
  */
 export function createPgPool() {
-  return new pg.Pool({ connectionString: env.DIRECT_DATABASE_URL, max: 2 });
+  return new pg.Pool({
+    connectionString: env.DIRECT_DATABASE_URL,
+    max: 2,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 10_000,
+    // Keep connections alive through Supabase's idle timeouts and proxies
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
+  });
 }
 
 /**

@@ -54,9 +54,55 @@ function startWatchdog() {
         }
       }
     } catch (e) {
-      console.error("[watchdog] Error:", e);
+      // Swallow connection errors — watchdog is best-effort, will retry next interval
+      console.error("[watchdog] Error (will retry next interval):", e instanceof Error ? e.message : e);
     }
   }, 10 * 60 * 1000); // 10 minutes
+}
+
+/**
+ * Create a fresh pool and verify the connection works.
+ * Retries with exponential backoff on failure.
+ */
+async function createPoolWithRetry(maxRetries = 10): Promise<ReturnType<typeof createPgPool>> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const pool = createPgPool();
+      pool.on("error", (err: Error) => {
+        console.error("[worker] Idle pool connection error (discarding):", err.message);
+      });
+      // Verify the connection actually works
+      await pool.query("SELECT 1");
+      await ensureQueue(pool);
+      return pool;
+    } catch (err) {
+      const delay = Math.min(2000 * Math.pow(2, attempt - 1), 30_000);
+      console.error(
+        `[worker] Connection attempt ${attempt}/${maxRetries} failed: ${err instanceof Error ? err.message : err}. Retrying in ${delay / 1000}s...`,
+      );
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw new Error("[worker] Failed to connect after max retries");
+}
+
+/**
+ * Check if an error is a connection/network failure that warrants pool recreation.
+ */
+function isConnectionError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message.toLowerCase();
+  const code = (err as any).code;
+  return (
+    code === "ETIMEDOUT" ||
+    code === "ENOTFOUND" ||
+    code === "ECONNRESET" ||
+    code === "ECONNREFUSED" ||
+    msg.includes("connection terminated") ||
+    msg.includes("server has closed the connection") ||
+    msg.includes("connection refused") ||
+    msg.includes("timeout expired")
+  );
 }
 
 async function main() {
@@ -64,14 +110,7 @@ async function main() {
 
   startWatchdog();
 
-  const pool = createPgPool();
-  
-  // Neutralize proxy timeouts (ETIMEDOUT) crashing Node during massive 10+ minute AI jobs.
-  pool.on("error", (err: Error) => {
-    console.error("[worker] Idle PostgreSQL connection dropped (Silently discarding):", err.message);
-  });
-
-  await ensureQueue(pool);
+  let pool = await createPoolWithRetry();
 
   console.log(`[worker] Listening for ${QUEUE_NAME} messages...`);
 
@@ -119,9 +158,23 @@ async function main() {
       }
     } catch (err) {
       if (!running) break;
-      console.error("[worker] Poll error:", err);
-      // Back off on connection errors
-      await new Promise((r) => setTimeout(r, 5000));
+      console.error("[worker] Poll error:", err instanceof Error ? err.message : err);
+
+      if (isConnectionError(err)) {
+        console.log("[worker] Connection lost. Recreating pool...");
+        try { await pool.end().catch(() => {}); } catch {}
+        try {
+          pool = await createPoolWithRetry();
+          console.log("[worker] Pool recreated successfully.");
+        } catch (reconnectErr) {
+          console.error("[worker] Failed to reconnect:", reconnectErr);
+          // Continue loop — will try again next iteration
+          await new Promise((r) => setTimeout(r, 10_000));
+        }
+      } else {
+        // Non-connection error — brief backoff
+        await new Promise((r) => setTimeout(r, 5000));
+      }
     }
   }
 

@@ -88,7 +88,7 @@ async def separate_audio(audio: UploadFile = File(...)):
         # Run demucs CLI: --two-stems=vocals splits into vocals + no_vocals (background)
         result = subprocess.run(
             ["python", "-m", "demucs", "-n", "htdemucs", "--two-stems=vocals",
-             "-o", out_dir, input_path],
+             "-d", "cpu", "-o", out_dir, input_path],
             capture_output=True, text=True, timeout=300,
         )
         if result.returncode != 0:

@@ -58,12 +58,69 @@ const TranslatedSegmentSchema = z.object({
 });
 
 /**
+ * Rough word count for a string.
+ */
+function wordCount(text: string): number {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+/**
+ * Build batches with a target max word count per batch.
+ * This prevents sending huge segments to GPT that cause summarization.
+ */
+function buildWordAwareBatches(
+  segments: TranscriptSegment[],
+  maxWordsPerBatch: number,
+  maxSegmentsPerBatch: number,
+): TranscriptSegment[][] {
+  const batches: TranscriptSegment[][] = [];
+  let currentBatch: TranscriptSegment[] = [];
+  let currentWords = 0;
+
+  for (const segment of segments) {
+    const segWords = wordCount(segment.text);
+
+    // If a single segment exceeds the limit, give it its own batch
+    if (segWords > maxWordsPerBatch) {
+      if (currentBatch.length > 0) {
+        batches.push(currentBatch);
+        currentBatch = [];
+        currentWords = 0;
+      }
+      batches.push([segment]);
+      continue;
+    }
+
+    // If adding this segment would exceed limits, flush the batch
+    if (
+      currentWords + segWords > maxWordsPerBatch ||
+      currentBatch.length >= maxSegmentsPerBatch
+    ) {
+      if (currentBatch.length > 0) {
+        batches.push(currentBatch);
+      }
+      currentBatch = [];
+      currentWords = 0;
+    }
+
+    currentBatch.push(segment);
+    currentWords += segWords;
+  }
+
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
+  }
+
+  return batches;
+}
+
+/**
  * OpenAI service — translate transcript segments via GPT-4o-mini.
  */
 export const openaiService = {
   /**
    * Translate an array of transcript segments to the target language.
-   * Processes in batches to stay within context limits.
+   * Uses word-aware batching to avoid GPT summarization on long segments.
    * Returns translated segments with original timing preserved.
    */
   async translateSegments(
@@ -71,25 +128,32 @@ export const openaiService = {
     targetLanguage: string,
     sourceLanguage?: string | null,
   ): Promise<TranslatedSegment[]> {
-    const BATCH_SIZE = 20;
+    const MAX_WORDS_PER_BATCH = 300;
+    const MAX_SEGMENTS_PER_BATCH = 15;
+
+    const batches = buildWordAwareBatches(
+      segments,
+      MAX_WORDS_PER_BATCH,
+      MAX_SEGMENTS_PER_BATCH,
+    );
+
     const allTranslated: TranslatedSegment[] = [];
+    let globalIndex = 0;
 
-    for (let i = 0; i < segments.length; i += BATCH_SIZE) {
-      const batch = segments.slice(i, i + BATCH_SIZE);
-      const batchIndex = Math.floor(i / BATCH_SIZE) + 1;
-      const totalBatches = Math.ceil(segments.length / BATCH_SIZE);
-
+    for (let b = 0; b < batches.length; b++) {
+      const batch = batches[b];
       console.log(
-        `[openai] Translating batch ${batchIndex}/${totalBatches} (${batch.length} segments)`,
+        `[openai] Translating batch ${b + 1}/${batches.length} (${batch.length} segments, ~${batch.reduce((sum, s) => sum + wordCount(s.text), 0)} words)`,
       );
 
       const translated = await this.translateBatch(
         batch,
-        i,
+        globalIndex,
         targetLanguage,
         sourceLanguage,
       );
       allTranslated.push(...translated);
+      globalIndex += batch.length;
     }
 
     return allTranslated;
@@ -97,8 +161,58 @@ export const openaiService = {
 
   /**
    * Translate a batch of segments using structured output.
+   * Retries with individual segments if the batch translation is suspiciously short.
    */
   async translateBatch(
+    segments: TranscriptSegment[],
+    startIndex: number,
+    targetLanguage: string,
+    sourceLanguage?: string | null,
+  ): Promise<TranslatedSegment[]> {
+    const result = await this.callTranslationAPI(
+      segments,
+      startIndex,
+      targetLanguage,
+      sourceLanguage,
+    );
+
+    // Validate: check if translated output is suspiciously short
+    const originalWords = segments.reduce(
+      (sum, s) => sum + wordCount(s.text),
+      0,
+    );
+    const translatedWords = result.reduce(
+      (sum, s) => sum + wordCount(s.translatedText),
+      0,
+    );
+
+    // If translation is less than 30% of original word count, it's likely summarized
+    if (originalWords > 20 && translatedWords < originalWords * 0.3) {
+      console.warn(
+        `[openai] Translation suspiciously short: ${originalWords} original words → ${translatedWords} translated words. Retrying segment-by-segment.`,
+      );
+
+      // Retry each segment individually
+      const retried: TranslatedSegment[] = [];
+      for (let i = 0; i < segments.length; i++) {
+        const single = await this.callTranslationAPI(
+          [segments[i]],
+          startIndex + i,
+          targetLanguage,
+          sourceLanguage,
+        );
+        retried.push(...single);
+      }
+      return retried;
+    }
+
+    return result;
+  },
+
+  /**
+   * Call the OpenAI API to translate segments.
+   */
+  async callTranslationAPI(
     segments: TranscriptSegment[],
     startIndex: number,
     targetLanguage: string,
@@ -124,12 +238,13 @@ export const openaiService = {
           content: `You are a professional video dubbing translator. ${sourceLangNote}Translate ALL of the following speech segments into ${targetLangName}.
 
 CRITICAL RULES:
+- Translate EVERY WORD of each segment completely. Do NOT summarize, shorten, or omit any content.
 - EVERY segment MUST be translated into ${targetLangName}. Never output text in any other language.
 - If a segment is already in ${targetLangName}, still return it (clean it up if needed).
 - If a segment is in a third language (neither source nor target), translate it into ${targetLangName} anyway.
 - Preserve the meaning, tone, and register of the original speech.
 - Keep translations natural and conversational — this will be spoken aloud.
-- Maintain roughly similar length to the original (the translated audio must fit the same time window).
+- The translated text MUST be approximately the same length as the original. Do NOT condense or abbreviate.
 - Handle idioms by finding equivalent expressions in ${targetLangName}.
 - Do NOT add or remove segments. Translate each segment indexed exactly as given.
 - Return ONLY the translated text for each segment index.`,
@@ -143,15 +258,26 @@ CRITICAL RULES:
         TranslatedSegmentSchema,
         "translation",
       ),
+      max_tokens: 16384,
       temperature: 0.3,
     });
 
-    const message = completion.choices[0]?.message;
-    if (!message?.parsed) {
-      throw new Error("OpenAI returned no parsed response");
+    const choice = completion.choices[0];
+    if (!choice?.message?.parsed) {
+      const finishReason = choice?.finish_reason;
+      throw new Error(
+        `OpenAI returned no parsed response (finish_reason: ${finishReason})`,
+      );
     }
 
-    const parsed = message.parsed.segments;
+    // Warn if truncated
+    if (choice.finish_reason === "length") {
+      console.warn(
+        `[openai] Response truncated (finish_reason: length) for batch starting at index ${startIndex}`,
+      );
+    }
+
+    const parsed = choice.message.parsed.segments;
 
     // Map back to TranslatedSegment with timing from originals
     return segments.map((original, i) => {
