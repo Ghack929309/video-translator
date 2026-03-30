@@ -12,6 +12,7 @@ interface TranslationProgressProps {
 const STEPS = [
   { key: "DOWNLOAD", label: "Download Video" },
   { key: "EXTRACT_AUDIO", label: "Extract Audio" },
+  { key: "SEPARATE_AUDIO", label: "Separate Background" },
   { key: "TRANSCRIBE", label: "Transcribe Speech" },
   { key: "TRANSLATE", label: "Translate Text" },
   { key: "CLONE_VOICE", label: "Clone Voice" },

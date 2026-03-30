@@ -99,6 +99,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
         resultVideoUrl: translation.resultVideoKey
           ? await tigris.presignedDownloadUrl(translation.resultVideoKey, 3600)
           : null,
+        failedSegmentCount: translation.failedSegmentCount,
+        totalSegmentCount: Array.isArray(translation.translatedJson)
+          ? (translation.translatedJson as unknown[]).length
+          : 0,
         startedAt: translation.startedAt?.toISOString() ?? null,
         completedAt: translation.completedAt?.toISOString() ?? null,
         createdAt: translation.createdAt.toISOString(),
@@ -242,6 +246,26 @@ export default function TranslationDetailPage() {
           />
         </CardContent>
       </Card>
+
+      {/* Failed Segment Warning (per D-13 and UI-SPEC.md) */}
+      {translation.failedSegmentCount > 0 && status !== "FAILED" && (
+        <div
+          role="alert"
+          className="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3"
+        >
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-500" aria-hidden="true" />
+            <span className="text-sm font-medium text-amber-500">
+              Some segments could not be synthesized
+            </span>
+          </div>
+          <p className="mt-1 text-sm text-amber-500/90">
+            {translation.failedSegmentCount} of {translation.totalSegmentCount} segments
+            failed during voice synthesis and were replaced with silence.
+            {status === "COMPLETED" && " The translation is otherwise complete."}
+          </p>
+        </div>
+      )}
 
       {/* Details */}
       <Card>

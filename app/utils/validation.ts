@@ -40,6 +40,10 @@ export const videoSubmitSchema = z.object({
     .min(2, "Please select a target language")
     .max(5),
   ttsEngine: z.enum(["FISH_AUDIO", "COSYVOICE"]),
+  enableBackgroundMix: z
+    .string()
+    .optional()
+    .transform((val) => val !== "false"),
 });
 
 export const updateProfileSchema = z.object({

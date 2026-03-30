@@ -12,6 +12,7 @@ import { Label } from "~/components/ui/label";
 import { Card, CardContent } from "~/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Separator } from "~/components/ui/separator";
+import { Switch } from "~/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -51,7 +52,7 @@ export async function action({ request }: Route.ActionArgs) {
     return { error: firstError };
   }
 
-  const { sourceType, sourceUrl, storageKey, title, targetLanguage, ttsEngine } =
+  const { sourceType, sourceUrl, storageKey, title, targetLanguage, ttsEngine, enableBackgroundMix } =
     parsed.data;
 
   // Rate limit: max 5 concurrent (PENDING or PROCESSING) jobs per user
@@ -84,6 +85,7 @@ export async function action({ request }: Route.ActionArgs) {
       videoId: video.id,
       targetLanguage,
       ttsEngine,
+      enableBackgroundMix,
     },
   });
 
@@ -104,6 +106,7 @@ export default function NewTranslationPage() {
   const [detectedPlatform, setDetectedPlatform] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [engine, setEngine] = useState<"FISH_AUDIO" | "COSYVOICE" | null>(null);
+  const [enableBackgroundMix, setEnableBackgroundMix] = useState(true);
 
   const upload = useUpload();
 
@@ -213,6 +216,21 @@ export default function NewTranslationPage() {
               <LanguageSelector value={selectedLang} onChange={setSelectedLang} engine={engine} />
             </div>
 
+            {/* Background Audio Toggle (per D-06) */}
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-0.5">
+                <Label htmlFor="enableBackgroundMix">Preserve Background Audio</Label>
+                <p className="text-xs text-muted-foreground">
+                  Keep music, ambient sounds, and other background audio in the translated video.
+                </p>
+              </div>
+              <Switch
+                id="enableBackgroundMix"
+                checked={enableBackgroundMix}
+                onCheckedChange={(checked) => setEnableBackgroundMix(checked)}
+              />
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="title">Video Title</Label>
               <Input
@@ -241,6 +259,11 @@ export default function NewTranslationPage() {
               type="hidden"
               name="ttsEngine"
               value={engine ?? ""}
+            />
+            <input
+              type="hidden"
+              name="enableBackgroundMix"
+              value={enableBackgroundMix ? "true" : "false"}
             />
             {tab === "upload" ? (
               <>
