@@ -8,6 +8,9 @@ import shutil
 import uuid
 import threading
 
+import logging
+logging.getLogger("multipart").setLevel(logging.WARNING)
+
 from fastapi import FastAPI, UploadFile, Form, File, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 
@@ -39,6 +42,13 @@ TASKS_LOCK = threading.Lock()
 DEMUCS_OUTPUT_BASE = os.path.join(tempfile.gettempdir(), "demucs_tasks")
 os.makedirs(DEMUCS_OUTPUT_BASE, exist_ok=True)
 
+# Demucs runs in its own conda env with CUDA-enabled PyTorch (isolated from CosyVoice)
+DEMUCS_PYTHON = "/opt/conda/envs/demucs/bin/python"
+if not os.path.exists(DEMUCS_PYTHON):
+    # Fallback for local dev — use current env's python
+    DEMUCS_PYTHON = sys.executable
+    print(f"[demucs] Isolated env not found, using {DEMUCS_PYTHON}")
+
 
 def _run_demucs_task(task_id: str, input_path: str, work_dir: str):
     """Run demucs in a background thread and store the result.
@@ -48,32 +58,35 @@ def _run_demucs_task(task_id: str, input_path: str, work_dir: str):
     demucs_out = os.path.join(work_dir, "out")
 
     try:
-        # Try GPU first — much faster (~30s vs 5-10min on CPU)
-        print(f"[demucs] Task {task_id}: attempting GPU (cuda)...")
+        # Run demucs on GPU using isolated conda env with CUDA-enabled PyTorch.
+        # TORCH_HOME ensures the subprocess finds the pre-downloaded model weights.
+        demucs_env = {**os.environ, "TORCH_HOME": "/app/.cache/torch"}
+
+        print(f"[demucs] Task {task_id}: running on GPU via isolated env ({DEMUCS_PYTHON})...")
         result = subprocess.run(
-            ["python", "-m", "demucs", "-n", "htdemucs", "--two-stems=vocals",
+            [DEMUCS_PYTHON, "-m", "demucs", "-n", "htdemucs", "--two-stems=vocals",
              "-d", "cuda", "-o", demucs_out, input_path],
             capture_output=True, text=True, timeout=300,
+            env=demucs_env,
         )
 
-        # If GPU fails (CUDA kernel mismatch, OOM, etc.), fall back to CPU
         if result.returncode != 0:
-            gpu_err = result.stderr[-300:] if result.stderr else "unknown error"
-            print(f"[demucs] Task {task_id}: GPU failed ({gpu_err}), falling back to CPU...")
+            gpu_err = result.stderr[-500:] if result.stderr else "unknown error"
+            print(f"[demucs] Task {task_id}: GPU failed, trying CPU fallback...\n{gpu_err}")
 
-            # Clean up any partial GPU output
+            # Clean partial output and retry on CPU as last resort
             if os.path.exists(demucs_out):
                 shutil.rmtree(demucs_out)
 
             result = subprocess.run(
-                ["python", "-m", "demucs", "-n", "htdemucs", "--two-stems=vocals",
-                 "-d", "cpu", "--segment", "30", "-j", "2",
-                 "-o", demucs_out, input_path],
+                [DEMUCS_PYTHON, "-m", "demucs", "-n", "htdemucs", "--two-stems=vocals",
+                 "-d", "cpu", "--segment", "30", "-o", demucs_out, input_path],
                 capture_output=True, text=True, timeout=900,
+                env=demucs_env,
             )
 
         if result.returncode != 0:
-            raise RuntimeError(f"Demucs CLI failed: {result.stderr[-500:]}")
+            raise RuntimeError(f"Demucs failed: {result.stderr[-500:]}")
 
         stem_dir = os.path.join(demucs_out, "htdemucs", "input")
         vocals_path = os.path.join(stem_dir, "vocals.wav")
