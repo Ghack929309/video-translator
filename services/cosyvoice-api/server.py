@@ -3,14 +3,13 @@ import sys
 import tempfile
 import traceback
 import io
-import base64
 import subprocess
 import shutil
 import uuid
 import threading
 
 from fastapi import FastAPI, UploadFile, Form, File, HTTPException
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 
 import torch
 import torchaudio
@@ -31,25 +30,32 @@ app = FastAPI(title="CosyVoice 3 API Service")
 READY = False
 
 # ── Async Demucs Task Store ───────────────────────────────────────────────
-# Tasks are stored in memory — fine since there's only one pod and tasks
-# are short-lived (cleaned up after retrieval or 30 minutes).
+# task_id -> { status, output_dir (on disk), error }
+# Output files are served via /separate/{task_id}/{stem} endpoints.
 TASKS: dict[str, dict] = {}
 TASKS_LOCK = threading.Lock()
+
+# Persistent output dir for demucs results (cleaned up after download)
+DEMUCS_OUTPUT_BASE = os.path.join(tempfile.gettempdir(), "demucs_tasks")
+os.makedirs(DEMUCS_OUTPUT_BASE, exist_ok=True)
 
 
 def _run_demucs_task(task_id: str, input_path: str, work_dir: str):
     """Run demucs in a background thread and store the result."""
-    out_dir = os.path.join(work_dir, "out")
+    output_dir = os.path.join(DEMUCS_OUTPUT_BASE, task_id)
+    os.makedirs(output_dir, exist_ok=True)
+    demucs_out = os.path.join(work_dir, "out")
+
     try:
         result = subprocess.run(
             ["python", "-m", "demucs", "-n", "htdemucs", "--two-stems=vocals",
-             "-d", "cpu", "-o", out_dir, input_path],
+             "-d", "cpu", "-o", demucs_out, input_path],
             capture_output=True, text=True, timeout=600,
         )
         if result.returncode != 0:
             raise RuntimeError(f"Demucs CLI failed: {result.stderr[-500:]}")
 
-        stem_dir = os.path.join(out_dir, "htdemucs", "input")
+        stem_dir = os.path.join(demucs_out, "htdemucs", "input")
         vocals_path = os.path.join(stem_dir, "vocals.wav")
         bg_path = os.path.join(stem_dir, "no_vocals.wav")
 
@@ -57,31 +63,23 @@ def _run_demucs_task(task_id: str, input_path: str, work_dir: str):
             contents = os.listdir(stem_dir) if os.path.exists(stem_dir) else "stem_dir not found"
             raise RuntimeError(f"Demucs output missing. Dir contents: {contents}")
 
-        bg_wav, bg_sr = torchaudio.load(bg_path)
-        vocals_wav, _ = torchaudio.load(vocals_path)
-
-        bg_io = io.BytesIO()
-        torchaudio.save(bg_io, bg_wav, bg_sr, format="wav")
-
-        vocals_io = io.BytesIO()
-        torchaudio.save(vocals_io, vocals_wav, bg_sr, format="wav")
+        # Move output files to persistent output dir (survives work_dir cleanup)
+        shutil.move(bg_path, os.path.join(output_dir, "background.wav"))
+        shutil.move(vocals_path, os.path.join(output_dir, "vocals.wav"))
 
         with TASKS_LOCK:
-            TASKS[task_id] = {
-                "status": "completed",
-                "background": base64.b64encode(bg_io.getvalue()).decode("ascii"),
-                "vocals": base64.b64encode(vocals_io.getvalue()).decode("ascii"),
-                "sample_rate": bg_sr,
-            }
+            TASKS[task_id] = {"status": "completed", "output_dir": output_dir}
         print(f"[demucs] Task {task_id} completed successfully.")
 
     except Exception as e:
         traceback.print_exc()
         with TASKS_LOCK:
             TASKS[task_id] = {"status": "failed", "error": str(e)}
+        shutil.rmtree(output_dir, ignore_errors=True)
         print(f"[demucs] Task {task_id} failed: {e}")
 
     finally:
+        # Clean up the working directory (demucs intermediate files)
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
@@ -100,7 +98,6 @@ except Exception as e:
 print(f"[Model Loaded] Sample rate: {MODEL.sample_rate}")
 
 # ── Warmup Inference ──────────────────────────────────────────────────────
-# Triggers CUDA kernel compilation so the first real request isn't slow.
 
 print("[Starting up] Running warmup inference...")
 try:
@@ -142,7 +139,6 @@ async def separate_audio(audio: UploadFile = File(...)):
     with TASKS_LOCK:
         TASKS[task_id] = {"status": "processing"}
 
-    # Run demucs in background thread — returns immediately to avoid proxy timeout
     thread = threading.Thread(target=_run_demucs_task, args=(task_id, input_path, work_dir), daemon=True)
     thread.start()
 
@@ -151,8 +147,8 @@ async def separate_audio(audio: UploadFile = File(...)):
 
 
 @app.get("/separate/{task_id}")
-def get_separate_result(task_id: str):
-    """Poll for Demucs separation result."""
+def get_separate_status(task_id: str):
+    """Poll for Demucs separation status (lightweight — no audio data)."""
     with TASKS_LOCK:
         task = TASKS.get(task_id)
 
@@ -163,22 +159,43 @@ def get_separate_result(task_id: str):
         return JSONResponse({"task_id": task_id, "status": "processing"})
 
     if task["status"] == "failed":
-        # Clean up task after retrieval
         with TASKS_LOCK:
             TASKS.pop(task_id, None)
         raise HTTPException(status_code=500, detail=f"Demucs separation failed: {task['error']}")
 
-    # completed — return result and clean up
-    result = {
-        "task_id": task_id,
-        "status": "completed",
-        "background": task["background"],
-        "vocals": task["vocals"],
-        "sample_rate": task["sample_rate"],
-    }
+    # completed — just return status, files are downloaded separately
+    return JSONResponse({"task_id": task_id, "status": "completed"})
+
+
+@app.get("/separate/{task_id}/{stem}")
+def download_stem(task_id: str, stem: str):
+    """Download a separated audio stem (background or vocals)."""
+    if stem not in ("background", "vocals"):
+        raise HTTPException(status_code=400, detail="stem must be 'background' or 'vocals'")
+
     with TASKS_LOCK:
-        TASKS.pop(task_id, None)
-    return JSONResponse(result)
+        task = TASKS.get(task_id)
+
+    if task is None or task.get("status") != "completed":
+        raise HTTPException(status_code=404, detail="Task not found or not completed")
+
+    file_path = os.path.join(task["output_dir"], f"{stem}.wav")
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=f"{stem}.wav not found")
+
+    return FileResponse(file_path, media_type="audio/wav", filename=f"{stem}.wav")
+
+
+@app.delete("/separate/{task_id}")
+def cleanup_task(task_id: str):
+    """Clean up task output files after client has downloaded them."""
+    with TASKS_LOCK:
+        task = TASKS.pop(task_id, None)
+
+    if task and task.get("output_dir"):
+        shutil.rmtree(task["output_dir"], ignore_errors=True)
+
+    return JSONResponse({"status": "cleaned"})
 
 
 @app.post("/synthesize")
@@ -189,7 +206,6 @@ async def synthesize(
     reference_text: str = Form(""),
     reference_audio: UploadFile = File(...)
 ):
-    # Validate inputs
     text = text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="Text cannot be empty")
@@ -202,16 +218,13 @@ async def synthesize(
 
     speed = max(0.5, min(2.0, speed))
 
-    # Save uploaded file to temp path
     fd, temp_wav_path = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
 
     try:
-        # Write bytes
         with open(temp_wav_path, "wb") as f:
             f.write(await reference_audio.read())
 
-        # Validate it's a valid audio file (avoids CosyVoice crashing)
         try:
             waveform, sample_rate = torchaudio.load(temp_wav_path)
             duration = waveform.shape[1] / sample_rate
@@ -222,7 +235,6 @@ async def synthesize(
                 raise e
             raise HTTPException(status_code=400, detail="Invalid audio file")
 
-        # Inference
         print(f"Synthesizing | Mode: {mode} | Text len: {len(text)} | Ref duration: {duration:.2f}s")
 
         try:
@@ -242,7 +254,6 @@ async def synthesize(
                     speed=speed,
                 )
 
-            # Generator yields dicts with 'tts_speech'
             all_chunks = []
             for chunk in output_gen:
                 all_chunks.append(chunk["tts_speech"])
@@ -250,20 +261,12 @@ async def synthesize(
             if not all_chunks:
                 raise HTTPException(status_code=500, detail="Model returned no audio")
 
-            # Concatenate chunks
             speech_tensor = torch.cat(all_chunks, dim=1)
 
-            # Save raw tensor to WAV format in memory
             wav_io = io.BytesIO()
-            torchaudio.save(
-                wav_io,
-                speech_tensor,
-                MODEL.sample_rate,
-                format="wav"
-            )
+            torchaudio.save(wav_io, speech_tensor, MODEL.sample_rate, format="wav")
             wav_io.seek(0)
 
-            # Return binary stream
             return StreamingResponse(wav_io, media_type="audio/wav")
 
         except Exception as e:
@@ -271,7 +274,6 @@ async def synthesize(
             raise HTTPException(status_code=500, detail=str(e))
 
     finally:
-        # Clean up temp file
         if os.path.exists(temp_wav_path):
             os.remove(temp_wav_path)
 

@@ -156,7 +156,7 @@ export const cosyvoice = {
 
     console.log(`[cosyvoice] Demucs task started: ${taskId}. Polling for result...`);
 
-    // Step 2: Poll for result (up to 10 minutes)
+    // Step 2: Poll for completion (lightweight status-only responses)
     const pollUrl = `${baseUrl}/separate/${taskId}`;
     const pollTimeout = 600000; // 10 min max
     const pollInterval = 5000; // 5s between polls
@@ -181,8 +181,21 @@ export const cosyvoice = {
       }
 
       if (pollData.status === "completed") {
-        const backgroundBuffer = Buffer.from(pollData.background, "base64");
-        const vocalsBuffer = Buffer.from(pollData.vocals, "base64");
+        // Step 3: Download each stem as a separate binary request (avoids base64 bloat & proxy size limits)
+        const bgRes = await fetch(`${baseUrl}/separate/${taskId}/background`, {
+          signal: AbortSignal.timeout(60000),
+        });
+        if (!bgRes.ok) throw new Error(`Failed to download background stem (${bgRes.status})`);
+        const backgroundBuffer = Buffer.from(await bgRes.arrayBuffer());
+
+        const vocalsRes = await fetch(`${baseUrl}/separate/${taskId}/vocals`, {
+          signal: AbortSignal.timeout(60000),
+        });
+        if (!vocalsRes.ok) throw new Error(`Failed to download vocals stem (${vocalsRes.status})`);
+        const vocalsBuffer = Buffer.from(await vocalsRes.arrayBuffer());
+
+        // Clean up server-side files
+        await fetch(`${baseUrl}/separate/${taskId}`, { method: "DELETE" }).catch(() => {});
 
         console.log(
           `[cosyvoice] Demucs separation complete in ${((Date.now() - start) / 1000).toFixed(1)}s — background: ${(backgroundBuffer.length / 1024).toFixed(0)}KB, vocals: ${(vocalsBuffer.length / 1024).toFixed(0)}KB`,
@@ -191,7 +204,7 @@ export const cosyvoice = {
         return {
           background: backgroundBuffer,
           vocals: vocalsBuffer,
-          sampleRate: pollData.sample_rate,
+          sampleRate: 44100, // Demucs htdemucs outputs at 44.1kHz
         };
       }
 
