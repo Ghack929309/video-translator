@@ -12,6 +12,55 @@ import { cosyvoice } from "~/services/cosyvoice.server";
 import { env } from "~/utils/env.server";
 import { runpodApi } from "~/services/runpod-api.server";
 
+// ── Delayed Pod Shutdown ──────────────────────────────────────────────────
+// Instead of stopping the pod immediately after a job completes, wait 20 minutes.
+// If a new job starts within that window, cancel the pending shutdown.
+const POD_IDLE_TIMEOUT_MS = 20 * 60 * 1000; // 20 minutes
+let podShutdownTimer: ReturnType<typeof setTimeout> | null = null;
+
+function schedulePodShutdown() {
+  // Cancel any existing scheduled shutdown
+  if (podShutdownTimer) {
+    clearTimeout(podShutdownTimer);
+    podShutdownTimer = null;
+  }
+
+  if (!env.RUNPOD_POD_ID) return;
+
+  console.log(`[pipeline] Pod shutdown scheduled in 20 minutes (cancel if new job starts)`);
+
+  podShutdownTimer = setTimeout(async () => {
+    podShutdownTimer = null;
+    try {
+      // Double-check no active jobs before stopping
+      const activeJobs = await db.translation.count({
+        where: {
+          status: "PROCESSING",
+          ttsEngine: "COSYVOICE",
+        },
+      });
+
+      if (activeJobs > 0) {
+        console.log(`[pipeline] Pod shutdown cancelled — ${activeJobs} active job(s)`);
+        return;
+      }
+
+      console.log(`[pipeline] Pod idle for 20 minutes — stopping to save billing...`);
+      await runpodApi.stopPod(env.RUNPOD_POD_ID!);
+    } catch (err) {
+      console.error(`[pipeline] Failed to stop pod after idle timeout:`, err);
+    }
+  }, POD_IDLE_TIMEOUT_MS);
+}
+
+function cancelPodShutdown() {
+  if (podShutdownTimer) {
+    clearTimeout(podShutdownTimer);
+    podShutdownTimer = null;
+    console.log(`[pipeline] Pending pod shutdown cancelled — new job started`);
+  }
+}
+
 type PipelineStep =
   | "DOWNLOAD"
   | "EXTRACT_AUDIO"
@@ -104,6 +153,9 @@ export const pipeline = {
 
     const jobStart = Date.now();
 
+    // Cancel any pending pod shutdown — a new job is starting
+    cancelPodShutdown();
+
     // Determine resume point: if retrying a failed job, skip already-completed steps
     let startIndex = 0;
     if (translation.status === "FAILED" && translation.errorStep) {
@@ -195,34 +247,10 @@ export const pipeline = {
     } finally {
       ffmpeg.cleanup(translationId);
 
-      // Phase 9: Concurrency Safety (Queue Check Before Shutdown)
+      // Schedule delayed pod shutdown (20 min idle timeout)
+      // If another job starts within that window, the timer is cancelled.
       if (translation.ttsEngine === "COSYVOICE" && env.RUNPOD_POD_ID) {
-        try {
-          // Check if there are other processing/pending CosyVoice jobs
-          const activeJobs = await db.translation.count({
-            where: {
-              status: { in: ["PENDING", "PROCESSING"] },
-              id: { not: translationId },
-              ttsEngine: "COSYVOICE",
-            },
-          });
-
-          if (activeJobs > 0) {
-            console.log(
-              `[pipeline] Keeping RunPod On-Demand Pod awake — ${activeJobs} CosyVoice jobs still active.`,
-            );
-          } else {
-            console.log(
-              `[pipeline] Ensuring RunPod Standard Pod stops compute billing (Queue Empty)...`,
-            );
-            await runpodApi.stopPod(env.RUNPOD_POD_ID);
-          }
-        } catch (queueErr) {
-          console.error(
-            `[pipeline] FAILED to safely check queue or stop RunPod On-Demand Pod!`,
-            queueErr,
-          );
-        }
+        schedulePodShutdown();
       }
     }
   },
@@ -1030,10 +1058,7 @@ export const pipeline = {
       console.log(`[pipeline] Step SYNTHESIZE complete — stored at ${audioKey}`);
     } finally {
       if (isCosyVoice && env.RUNPOD_POD_ID) {
-        console.log(`[pipeline] Ensuring RunPod Standard Pod stops compute billing...`);
-        await runpodApi.stopPod(env.RUNPOD_POD_ID).catch((err: any) =>
-          console.error(`[pipeline] FAILED to stop RunPod On-Demand Pod!`, err)
-        );
+        schedulePodShutdown();
       }
     }
   },
