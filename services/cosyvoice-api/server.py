@@ -236,6 +236,7 @@ async def synthesize(
     text: str = Form(...),
     mode: str = Form(...),
     speed: float = Form(1.0),
+    target_language: str = Form(""),
     reference_text: str = Form(""),
     reference_audio: UploadFile = File(...)
 ):
@@ -268,12 +269,18 @@ async def synthesize(
                 raise e
             raise HTTPException(status_code=400, detail="Invalid audio file")
 
-        print(f"Synthesizing | Mode: {mode} | Text len: {len(text)} | Ref duration: {duration:.2f}s")
+        # Build the model prompt. CosyVoice 3 cross_lingual format:
+        #   <|endofprompt|><|LANG|>text
+        # The language tag MUST come right after endofprompt to set target phonology.
+        # No English instruction prefix — it causes accent bleeding.
+        lang_tag = f"<|{target_language}|>" if target_language else ""
+
+        print(f"Synthesizing | Mode: {mode} | Lang: {target_language or 'auto'} | Text len: {len(text)} | Ref duration: {duration:.2f}s")
 
         try:
             if mode == "cross_lingual":
                 output_gen = MODEL.inference_cross_lingual(
-                    f"You are a helpful assistant.<|endofprompt|>{text}",
+                    f"<|endofprompt|>{lang_tag}{text}",
                     temp_wav_path,
                     stream=False,
                     speed=speed,
