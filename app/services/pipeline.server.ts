@@ -146,6 +146,37 @@ async function withRetry(
  */
 const MAX_SEGMENT_SEC = 15;
 
+/**
+ * Phase 13: Short segment threshold for carrier phrase padding.
+ * Segments with fewer characters than this get padded with a carrier phrase
+ * to give CosyVoice more linguistic context and reduce accent bleeding.
+ */
+const SHORT_SEGMENT_CHARS = 12;
+
+/**
+ * Phase 13: Carrier phrases per language — natural filler sentences appended
+ * to short TTS inputs so the model has enough phonological context.
+ * The carrier audio gets trimmed off after synthesis.
+ */
+const CARRIER_PHRASES: Record<string, string> = {
+  en: " And so, that is what happened next.",
+  fr: " Et donc, voilà ce qui s'est passé ensuite.",
+  es: " Y entonces, eso es lo que pasó después.",
+  de: " Und so ist das dann passiert.",
+  it: " E quindi, ecco cosa è successo dopo.",
+  pt: " E então, foi isso que aconteceu depois.",
+  ja: " それで、次に起こったことはこうです。",
+  ko: " 그래서 다음에 일어난 일은 이렇습니다.",
+  zh: " 所以接下来发生的事情是这样的。",
+  ru: " И вот что произошло дальше.",
+  ar: " وهكذا، هذا ما حدث بعد ذلك.",
+  hi: " और फिर, यही हुआ उसके बाद।",
+};
+
+function getCarrierPhrase(langCode: string): string {
+  return CARRIER_PHRASES[langCode] ?? CARRIER_PHRASES.en;
+}
+
 interface TranslatedSegment {
   translatedText: string;
   start: number;
@@ -560,9 +591,21 @@ export const pipeline = {
       }
 
       // Step 4: Send to Demucs /separate endpoint
-      const { background } = await cosyvoice.separateAudio(fullQualityPath);
+      const { background, vocals } =
+        await cosyvoice.separateAudio(fullQualityPath);
 
-      // Step 5: Save background track locally and check if meaningful
+      // Step 5a: Save vocals track locally for high-quality voice cloning (Phase 13)
+      const vocalsPath = path.join(tmpDir, "vocals-audio.wav");
+      fs.writeFileSync(vocalsPath, vocals);
+
+      // Step 5b: Upload vocals track to Tigris for voice cloning
+      const vocalsKey = `translations/${translationId}/vocals-audio.wav`;
+      await tigris.upload(vocalsKey, vocals, "audio/wav");
+      console.log(
+        `[pipeline] Vocals track saved: ${(vocals.length / 1024).toFixed(0)}KB — will use for voice cloning`,
+      );
+
+      // Step 5c: Save background track locally and check if meaningful
       const bgPath = path.join(tmpDir, "background-audio.wav");
       fs.writeFileSync(bgPath, background);
 
@@ -585,12 +628,13 @@ export const pipeline = {
 
       await updateTranslation(translationId, {
         backgroundAudioKey: bgKey,
+        vocalsAudioKey: vocalsKey,
         currentStep: "SEPARATE_AUDIO",
         progress: STEP_PROGRESS.SEPARATE_AUDIO,
       });
 
       console.log(
-        `[pipeline] Step SEPARATE_AUDIO complete — background stored at ${bgKey}`,
+        `[pipeline] Step SEPARATE_AUDIO complete — background stored at ${bgKey}, vocals at ${vocalsKey}`,
       );
     } catch (err) {
       // Per D-07: If background extraction fails, fall back silently to speech-only
@@ -788,19 +832,58 @@ export const pipeline = {
       progress: 60,
     });
 
-    // Download source audio to /tmp
+    // Phase 13: Prefer high-quality vocals-only audio (44.1kHz) for voice cloning
+    // Falls back to 16kHz ASR audio if vocals aren't available
     fs.mkdirSync(tmpDir, { recursive: true });
     const audioPath = path.join(tmpDir, "voice-sample.wav");
+    let audioSource = "extractedAudio (16kHz mono)";
 
-    const audioStream = await tigris.download(translation.extractedAudioKey);
-    if (!audioStream) throw new Error("Failed to download extracted audio");
-
-    const ws = fs.createWriteStream(audioPath);
-    for await (const chunk of audioStream as AsyncIterable<Uint8Array>) {
-      ws.write(chunk);
+    if (translation.vocalsAudioKey) {
+      // Use Demucs-separated vocals — clean speech without background noise, 44.1kHz
+      const vocalsLocalPath = path.join(tmpDir, "vocals-audio.wav");
+      if (!fs.existsSync(vocalsLocalPath)) {
+        const vocalsStream = await tigris.download(translation.vocalsAudioKey);
+        if (vocalsStream) {
+          const vws = fs.createWriteStream(vocalsLocalPath);
+          for await (const chunk of vocalsStream as AsyncIterable<Uint8Array>) {
+            vws.write(chunk);
+          }
+          vws.end();
+          await new Promise<void>((resolve) => vws.on("finish", resolve));
+        }
+      }
+      if (
+        fs.existsSync(vocalsLocalPath) &&
+        fs.statSync(vocalsLocalPath).size > 1000
+      ) {
+        fs.copyFileSync(vocalsLocalPath, audioPath);
+        audioSource = "vocals (44.1kHz, Demucs-separated)";
+      } else {
+        // Fall back to extracted audio
+        const audioStream = await tigris.download(
+          translation.extractedAudioKey,
+        );
+        if (!audioStream) throw new Error("Failed to download extracted audio");
+        const ws = fs.createWriteStream(audioPath);
+        for await (const chunk of audioStream as AsyncIterable<Uint8Array>) {
+          ws.write(chunk);
+        }
+        ws.end();
+        await new Promise<void>((resolve) => ws.on("finish", resolve));
+      }
+    } else {
+      const audioStream = await tigris.download(translation.extractedAudioKey);
+      if (!audioStream) throw new Error("Failed to download extracted audio");
+      const ws = fs.createWriteStream(audioPath);
+      for await (const chunk of audioStream as AsyncIterable<Uint8Array>) {
+        ws.write(chunk);
+      }
+      ws.end();
+      await new Promise<void>((resolve) => ws.on("finish", resolve));
     }
-    ws.end();
-    await new Promise<void>((resolve) => ws.on("finish", resolve));
+    console.log(
+      `[pipeline] Step CLONE_VOICE — using ${audioSource} for voice reference extraction`,
+    );
 
     // Parse transcript to find unique speakers
     const transcript = translation.transcriptJson as unknown as {
@@ -809,22 +892,44 @@ export const pipeline = {
         start: number;
         end: number;
         speaker?: string;
+        words?: {
+          text: string;
+          start: number;
+          end: number;
+          confidence: number;
+        }[];
       }[];
     };
-    const speakerSegments = new Map<string, { start: number; end: number }[]>();
+    const speakerSegments = new Map<
+      string,
+      { start: number; end: number; confidence: number }[]
+    >();
 
     for (const seg of transcript.segments) {
       const speaker = seg.speaker ?? "A";
       if (!speakerSegments.has(speaker)) {
         speakerSegments.set(speaker, []);
       }
-      speakerSegments.get(speaker)!.push({ start: seg.start, end: seg.end });
+      // Compute average word confidence for this segment
+      const avgConfidence =
+        seg.words && seg.words.length > 0
+          ? seg.words.reduce((sum, w) => sum + w.confidence, 0) /
+            seg.words.length
+          : 0.5;
+      speakerSegments
+        .get(speaker)!
+        .push({ start: seg.start, end: seg.end, confidence: avgConfidence });
     }
 
     const speakers = Array.from(speakerSegments.keys());
     console.log(
       `[pipeline] Step CLONE_VOICE — detected ${speakers.length} speaker(s): ${speakers.join(", ")}`,
     );
+
+    // Phase 13: Minimum reference length constants
+    const MIN_REF_SEC = 5; // Minimum for stable speaker embeddings
+    const MAX_REF_SEC = 10; // CosyVoice maximum window
+    const ABSOLUTE_MIN_SEC = 1.5; // Below this, skip the speaker entirely
 
     // Clone/extract a voice for each speaker
     const voiceMap: Record<string, string> = {};
@@ -833,45 +938,95 @@ export const pipeline = {
       const speaker = speakers[si];
       const segments = speakerSegments.get(speaker)!;
 
-      // Ensure pristine embeddings: Find the single longest clean segment instead of micro-stitching cuts
-      let bestSegment: { start: number; end: number; duration: number } | null =
-        null;
-      for (const seg of segments) {
-        const durationSec = (seg.end - seg.start) / 1000;
-        if (!bestSegment || durationSec > bestSegment.duration) {
-          bestSegment = {
-            start: seg.start,
-            end: seg.end,
-            duration: durationSec,
-          };
-        }
-      }
+      // Sort segments by duration descending, then by confidence descending
+      const ranked = segments
+        .map((seg) => ({
+          ...seg,
+          duration: (seg.end - seg.start) / 1000,
+        }))
+        .sort((a, b) => {
+          // Prefer segments >= 5s with high confidence
+          const aGood = a.duration >= MIN_REF_SEC ? 1 : 0;
+          const bGood = b.duration >= MIN_REF_SEC ? 1 : 0;
+          if (aGood !== bGood) return bGood - aGood;
+          if (Math.abs(a.duration - b.duration) > 1)
+            return b.duration - a.duration;
+          return b.confidence - a.confidence;
+        });
 
-      if (!bestSegment || bestSegment.duration < 0.5) {
+      const bestSegment = ranked[0];
+      if (!bestSegment || bestSegment.duration < ABSOLUTE_MIN_SEC) {
         console.warn(
-          `[pipeline] No usable audio for speaker ${speaker}, skipping`,
+          `[pipeline] No usable audio for speaker ${speaker} (best: ${bestSegment?.duration.toFixed(1) ?? 0}s < ${ABSOLUTE_MIN_SEC}s), skipping`,
         );
         continue;
       }
 
-      const startSec = bestSegment.start / 1000;
-      let endSec = bestSegment.end / 1000;
-      // Cap embeddings strictly below maximum memory window thresholds
-      if (endSec - startSec > 10) {
-        endSec = startSec + 10;
-      }
-
+      let totalDuration: number;
       const speakerSamplePath = path.join(
         tmpDir,
         `speaker-${speaker}-sample.wav`,
       );
-      await ffmpeg.extractTimeRange(
-        audioPath,
-        startSec,
-        endSec,
-        speakerSamplePath,
-      );
-      const totalDuration = endSec - startSec;
+
+      if (bestSegment.duration >= MIN_REF_SEC) {
+        // Single segment is long enough — use it directly
+        const startSec = bestSegment.start / 1000;
+        let endSec = bestSegment.end / 1000;
+        if (endSec - startSec > MAX_REF_SEC) {
+          endSec = startSec + MAX_REF_SEC;
+        }
+        await ffmpeg.extractTimeRange(
+          audioPath,
+          startSec,
+          endSec,
+          speakerSamplePath,
+        );
+        totalDuration = endSec - startSec;
+        console.log(
+          `[pipeline] Speaker ${speaker}: using single segment (${totalDuration.toFixed(1)}s, confidence: ${bestSegment.confidence.toFixed(2)})`,
+        );
+      } else {
+        // Phase 13: Concatenate top segments to reach MIN_REF_SEC
+        let accumulated = 0;
+        const parts: string[] = [];
+
+        for (
+          let ri = 0;
+          ri < ranked.length && accumulated < MIN_REF_SEC;
+          ri++
+        ) {
+          const seg = ranked[ri];
+          const startSec = seg.start / 1000;
+          let endSec = seg.end / 1000;
+          const remaining = MAX_REF_SEC - accumulated;
+          if (endSec - startSec > remaining) {
+            endSec = startSec + remaining;
+          }
+          const partPath = path.join(
+            tmpDir,
+            `speaker-${speaker}-part-${ri}.wav`,
+          );
+          await ffmpeg.extractTimeRange(audioPath, startSec, endSec, partPath);
+          parts.push(partPath);
+          accumulated += endSec - startSec;
+        }
+
+        if (parts.length === 1) {
+          fs.copyFileSync(parts[0], speakerSamplePath);
+        } else {
+          // Concatenate with 50ms silence gaps between segments
+          await ffmpeg.concatenateWithGaps(parts, speakerSamplePath, 0.05);
+        }
+        totalDuration = accumulated;
+        console.log(
+          `[pipeline] Speaker ${speaker}: concatenated ${parts.length} segments (${totalDuration.toFixed(1)}s total)`,
+        );
+        if (totalDuration < MIN_REF_SEC) {
+          console.warn(
+            `[pipeline] Speaker ${speaker}: reference is ${totalDuration.toFixed(1)}s (< ${MIN_REF_SEC}s) — voice quality may be degraded`,
+          );
+        }
+      }
 
       if (isCosyVoice) {
         // CosyVoice: reference is already a single contiguous clean shot under 10s
@@ -1079,9 +1234,26 @@ export const pipeline = {
           // Per D-19: No prosodySpeed, no avgCharsPerSec
           let audioBuffer: Buffer;
 
+          // Phase 13: Pad short segments with carrier phrase to reduce accent bleeding
+          const originalText = seg.translatedText;
+          const isShortSegment =
+            originalText.length < SHORT_SEGMENT_CHARS && isCosyVoice;
+          const carrierPhrase = isShortSegment
+            ? getCarrierPhrase(translation.targetLanguage)
+            : "";
+          const ttsText = isShortSegment
+            ? originalText + carrierPhrase
+            : originalText;
+
+          if (isShortSegment) {
+            console.log(
+              `[pipeline] Seg ${i}: short text (${originalText.length} chars) — padded with carrier phrase for better voice quality`,
+            );
+          }
+
           if (isCosyVoice) {
             audioBuffer = await cosyvoice.synthesize(
-              seg.translatedText,
+              ttsText,
               speakerRef,
               sourceLanguage,
               translation.targetLanguage,
@@ -1096,7 +1268,29 @@ export const pipeline = {
             );
           }
           fs.writeFileSync(rawPath, audioBuffer);
-          const actualGeneratedSec = await ffmpeg.getDuration(rawPath);
+          let actualGeneratedSec = await ffmpeg.getDuration(rawPath);
+
+          // Phase 13: Trim carrier phrase audio from the end if we padded
+          if (isShortSegment && carrierPhrase.length > 0) {
+            const originalRatio = originalText.length / ttsText.length;
+            const estimatedOriginalDuration =
+              actualGeneratedSec * originalRatio;
+            // Only trim if the estimated duration is reasonable (> 0.3s)
+            if (estimatedOriginalDuration > 0.3) {
+              const trimmedPath = path.join(tmpDir, `tts-trimmed-${i}.wav`);
+              await ffmpeg.extractTimeRange(
+                rawPath,
+                0,
+                estimatedOriginalDuration,
+                trimmedPath,
+              );
+              fs.copyFileSync(trimmedPath, rawPath);
+              actualGeneratedSec = await ffmpeg.getDuration(rawPath);
+              console.log(
+                `[pipeline] Seg ${i}: trimmed carrier phrase — kept ${estimatedOriginalDuration.toFixed(2)}s of ${(estimatedOriginalDuration / originalRatio).toFixed(2)}s`,
+              );
+            }
+          }
 
           // Phase 12: Revised gap-aware pacing — always enforce segment duration
           const targetDurationSec = segDurationSec;
@@ -1361,18 +1555,27 @@ export const pipeline = {
 
       if (fs.existsSync(bgPath)) {
         try {
-          // Pass 1a: Duck background by -8dB (per D-06)
-          const duckedBgPath = path.join(tmpDir, "background-ducked.wav");
-          await ffmpeg.duckBackground(bgPath, duckedBgPath, -8);
-
-          // Pass 1b: Pre-mix speech + ducked background (per D-20)
+          // Phase 13: Use dynamic sidechain ducking instead of flat -8dB
+          // Background is compressed only when speech is present — much more natural
           const premixPath = path.join(tmpDir, "premixed-audio.wav");
-          await ffmpeg.preMixAudio(speechPath, duckedBgPath, premixPath);
+          try {
+            await ffmpeg.sidechainDuck(speechPath, bgPath, premixPath);
+            console.log(
+              `[pipeline] Dynamic sidechain duck complete — background ducks during speech`,
+            );
+          } catch (sidechainErr) {
+            // Fall back to legacy flat ducking if sidechain fails
+            const scMsg =
+              sidechainErr instanceof Error ? sidechainErr.message : "Unknown";
+            console.warn(
+              `[pipeline] Sidechain ducking failed (${scMsg}) — falling back to flat -5dB ducking`,
+            );
+            const duckedBgPath = path.join(tmpDir, "background-ducked.wav");
+            await ffmpeg.duckBackground(bgPath, duckedBgPath, -5);
+            await ffmpeg.preMixAudio(speechPath, duckedBgPath, premixPath);
+          }
 
           finalAudioPath = premixPath;
-          console.log(
-            `[pipeline] Pre-mix complete — speech + ducked background`,
-          );
         } catch (err) {
           // Per D-07: If background mixing fails, fall back to speech-only
           const msg = err instanceof Error ? err.message : "Unknown error";
@@ -1382,6 +1585,26 @@ export const pipeline = {
           finalAudioPath = speechPath;
         }
       }
+    }
+
+    // Phase 13: Apply EBU R128 loudness normalization using the translation's loudness profile
+    const loudnessProfile = translation.loudnessProfile ?? "WEB";
+    try {
+      const normalizedPath = path.join(tmpDir, "normalized-audio.wav");
+      await ffmpeg.normalizeLoudness(
+        finalAudioPath,
+        normalizedPath,
+        loudnessProfile,
+      );
+      finalAudioPath = normalizedPath;
+      console.log(
+        `[pipeline] Loudness normalized to ${loudnessProfile} profile`,
+      );
+    } catch (normErr) {
+      const msg = normErr instanceof Error ? normErr.message : "Unknown";
+      console.warn(
+        `[pipeline] Loudness normalization failed (${msg}) — using unnormalized audio`,
+      );
     }
 
     const audioDuration = await ffmpeg.getDuration(finalAudioPath);

@@ -38,6 +38,39 @@ function getLanguageName(code: string): string {
 }
 
 /**
+ * Phase 13: Language-specific speaking rates (characters per second of speech).
+ * Used to compute target character counts for length-aware translation.
+ * Sources: empirical dubbing industry averages + TTS benchmarks.
+ */
+const CHARS_PER_SECOND: Record<string, number> = {
+  en: 14,
+  fr: 14,
+  es: 15,
+  de: 14,
+  it: 15,
+  pt: 15,
+  ja: 8,
+  ko: 12,
+  zh: 6,
+  ru: 14,
+  ar: 13,
+  hi: 13,
+  nl: 14,
+  pl: 14,
+  tr: 14,
+  vi: 13,
+  th: 12,
+  id: 14,
+  sv: 14,
+  uk: 14,
+  ht: 14,
+};
+
+function getCharsPerSecond(langCode: string): number {
+  return CHARS_PER_SECOND[langCode] ?? 14;
+}
+
+/**
  * A translated segment preserving the original timing.
  */
 export interface TranslatedSegment {
@@ -211,6 +244,7 @@ export const openaiService = {
 
   /**
    * Call the OpenAI API to translate segments.
+   * Phase 13: Now includes per-segment character count targets for length-aware translation.
    */
   async callTranslationAPI(
     segments: TranscriptSegment[],
@@ -218,8 +252,15 @@ export const openaiService = {
     targetLanguage: string,
     sourceLanguage?: string | null,
   ): Promise<TranslatedSegment[]> {
+    const cps = getCharsPerSecond(targetLanguage);
+
+    // Phase 13: Build segment list with character count targets
     const segmentList = segments
-      .map((s, i) => `[${startIndex + i}] ${s.text}`)
+      .map((s, i) => {
+        const durationSec = (s.end - s.start) / 1000;
+        const targetChars = Math.round(durationSec * cps);
+        return `[${startIndex + i}] (target: ~${targetChars} chars, ${durationSec.toFixed(1)}s) ${s.text}`;
+      })
       .join("\n");
 
     const targetLangName = getLanguageName(targetLanguage);
@@ -235,7 +276,7 @@ export const openaiService = {
       messages: [
         {
           role: "system",
-          content: `You are a professional video dubbing translator. ${sourceLangNote}Translate ALL of the following speech segments into ${targetLangName}.
+          content: `You are a professional video dubbing translator specializing in isochronous dubbing. ${sourceLangNote}Translate ALL of the following speech segments into ${targetLangName}.
 
 CRITICAL RULES:
 - Translate EVERY WORD of each segment completely. Do NOT summarize, shorten, or omit any content.
@@ -243,11 +284,19 @@ CRITICAL RULES:
 - If a segment is already in ${targetLangName}, still return it (clean it up if needed).
 - If a segment is in a third language (neither source nor target), translate it into ${targetLangName} anyway.
 - Preserve the meaning, tone, and register of the original speech.
-- Keep translations natural and conversational — this will be spoken aloud.
-- The translated text MUST be approximately the same length as the original. Do NOT condense or abbreviate.
+- Keep translations natural and conversational — this will be spoken aloud as dubbed audio.
 - Handle idioms by finding equivalent expressions in ${targetLangName}.
 - Do NOT add or remove segments. Translate each segment indexed exactly as given.
-- Return ONLY the translated text for each segment index.`,
+- Return ONLY the translated text for each segment index.
+
+LENGTH MATCHING (CRITICAL FOR DUBBING):
+- Each segment shows a target character count in parentheses (e.g. "target: ~42 chars, 3.0s").
+- Your translation for each segment MUST be within ±15% of the shown target character count.
+- This is essential because the translated text will be synthesized as speech that must fit the original video timing.
+- Use shorter or longer synonyms, rephrase idioms, or adjust sentence structure to match the target length.
+- If a direct translation is too short, expand with natural filler words or more descriptive phrasing.
+- If a direct translation is too long, use concise synonyms or restructure the sentence.
+- Do NOT sacrifice meaning — find natural phrasing in ${targetLangName} that fits the duration.`,
         },
         {
           role: "user",
@@ -280,7 +329,7 @@ CRITICAL RULES:
     const parsed = choice.message.parsed.segments;
 
     // Map back to TranslatedSegment with timing from originals
-    return segments.map((original, i) => {
+    const results = segments.map((original, i) => {
       const match = parsed.find((p) => p.index === startIndex + i);
       return {
         originalText: original.text,
@@ -290,5 +339,44 @@ CRITICAL RULES:
         speaker: original.speaker,
       };
     });
+
+    // Phase 13: Post-translation length validation
+    const LENGTH_TOLERANCE = 0.2; // 20% tolerance for warnings
+    const outliers: {
+      index: number;
+      actual: number;
+      target: number;
+      ratio: number;
+    }[] = [];
+    for (let i = 0; i < results.length; i++) {
+      const seg = segments[i];
+      const durationSec = (seg.end - seg.start) / 1000;
+      const targetChars = Math.round(durationSec * cps);
+      const actualChars = results[i].translatedText.length;
+      if (targetChars > 0) {
+        const ratio = actualChars / targetChars;
+        if (Math.abs(ratio - 1) > LENGTH_TOLERANCE) {
+          outliers.push({
+            index: startIndex + i,
+            actual: actualChars,
+            target: targetChars,
+            ratio,
+          });
+        }
+      }
+    }
+    if (outliers.length > 0) {
+      console.warn(
+        `[openai] ${outliers.length} segment(s) outside ±${(LENGTH_TOLERANCE * 100).toFixed(0)}% length target: ` +
+          outliers
+            .map(
+              (o) =>
+                `[${o.index}] ${o.actual}/${o.target} chars (${((o.ratio - 1) * 100).toFixed(0)}%)`,
+            )
+            .join(", "),
+      );
+    }
+
+    return results;
   },
 };

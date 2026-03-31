@@ -61,11 +61,15 @@ export const ffmpeg = {
         .format("wav")
         .on("start", (cmd) => console.log(`[ffmpeg] ${cmd}`))
         .on("error", (err) =>
-          reject(new Error(`FFmpeg full-quality extract failed: ${err.message}`)),
+          reject(
+            new Error(`FFmpeg full-quality extract failed: ${err.message}`),
+          ),
         )
         .on("end", () => {
           const size = fs.statSync(outputPath).size;
-          console.log(`[ffmpeg] Full-quality audio extracted: ${(size / 1024 / 1024).toFixed(1)}MB (44.1kHz stereo)`);
+          console.log(
+            `[ffmpeg] Full-quality audio extracted: ${(size / 1024 / 1024).toFixed(1)}MB (44.1kHz stereo)`,
+          );
           resolve(outputPath);
         })
         .save(outputPath);
@@ -287,7 +291,7 @@ export const ffmpeg = {
       const fadeStart = Math.max(0, actualDuration - 0.1);
       console.warn(
         `[ffmpeg] timeStretchExact: audio shorter than target after stretch ` +
-        `(${actualDuration.toFixed(2)}s vs ${targetDurationSec.toFixed(2)}s) — fade-out applied, no silence padding`
+          `(${actualDuration.toFixed(2)}s vs ${targetDurationSec.toFixed(2)}s) — fade-out applied, no silence padding`,
       );
       await new Promise<void>((resolve, reject) => {
         Ffmpeg(stretchedTmp)
@@ -353,6 +357,87 @@ export const ffmpeg = {
   },
 
   /**
+   * Concatenate multiple audio files with silence gaps between them.
+   * Phase 13: Used to build longer voice reference samples from multiple short segments.
+   * @param inputPaths - Array of WAV file paths to concatenate
+   * @param outputPath - Output WAV path
+   * @param gapSec - Silence duration between segments (default 0.05s = 50ms)
+   */
+  async concatenateWithGaps(
+    inputPaths: string[],
+    outputPath: string,
+    gapSec: number = 0.05,
+  ): Promise<string> {
+    if (inputPaths.length === 0)
+      throw new Error("No input files to concatenate");
+    if (inputPaths.length === 1) {
+      fs.copyFileSync(inputPaths[0], outputPath);
+      return outputPath;
+    }
+
+    const ffmpegBin = ffmpegPath ?? "ffmpeg";
+
+    return new Promise((resolve, reject) => {
+      // Build filter: normalize each input to mono 44.1kHz, add silence gap, then concat
+      const inputs: string[] = [];
+      const filterParts: string[] = [];
+
+      for (let i = 0; i < inputPaths.length; i++) {
+        inputs.push("-i", inputPaths[i]);
+        filterParts.push(
+          `[${i}:a]aformat=sample_rates=44100:channel_layouts=mono[a${i}]`,
+        );
+      }
+
+      // Build concat with silence gaps using apad for each segment except the last
+      const concatInputs = inputPaths.map((_, i) => `[a${i}]`).join("");
+      const fullFilter = [
+        ...filterParts,
+        `${concatInputs}concat=n=${inputPaths.length}:v=0:a=1[out]`,
+      ].join(";");
+
+      const args = [
+        "-y",
+        ...inputs,
+        "-filter_complex",
+        fullFilter,
+        "-map",
+        "[out]",
+        "-ac",
+        "1",
+        "-ar",
+        "44100",
+        "-f",
+        "wav",
+        outputPath,
+      ];
+
+      console.log(
+        `[ffmpeg] Concatenating ${inputPaths.length} audio segments with ${gapSec}s gaps`,
+      );
+
+      const proc = spawn(ffmpegBin, args);
+      let stderr = "";
+      proc.stderr.on("data", (data: Buffer) => {
+        stderr += data.toString();
+      });
+
+      proc.on("close", (code: number | null) => {
+        if (code !== 0) {
+          console.error(`[ffmpeg] concat stderr:\n${stderr.slice(-500)}`);
+          reject(new Error(`FFmpeg concatenate failed with code ${code}`));
+          return;
+        }
+        resolve(outputPath);
+      });
+
+      proc.on("error", (err: Error) => {
+        reject(new Error(`Failed to start ffmpeg concat: ${err.message}`));
+      });
+    });
+  },
+
+  /**
    * Trim audio to maxSeconds and compress to MP3 for smaller uploads.
    */
   async trimAndCompress(
@@ -414,7 +499,11 @@ export const ffmpeg = {
       return outputPath;
     }
 
-    if (audioSegments.length === 1 && audioSegments[0].startMs === 0 && !durationSec) {
+    if (
+      audioSegments.length === 1 &&
+      audioSegments[0].startMs === 0 &&
+      !durationSec
+    ) {
       fs.copyFileSync(audioSegments[0].path, outputPath);
       return outputPath;
     }
@@ -434,7 +523,14 @@ export const ffmpeg = {
 
     // Base silent track to guarantee full duration and correct output length
     if (durationSec) {
-      args.push("-f", "lavfi", "-t", durationSec.toString(), "-i", "anullsrc=channel_layout=mono:sample_rate=44100");
+      args.push(
+        "-f",
+        "lavfi",
+        "-t",
+        durationSec.toString(),
+        "-i",
+        "anullsrc=channel_layout=mono:sample_rate=44100",
+      );
       mixRefs.push("[0:a]");
     }
 
@@ -447,7 +543,9 @@ export const ffmpeg = {
 
       const delayMs = Math.round(seg.startMs);
       if (delayMs > 0) {
-        filterParts.push(`[${inputIdx}:a]adelay=${delayMs}|${delayMs}[a${inputIdx}]`);
+        filterParts.push(
+          `[${inputIdx}:a]adelay=${delayMs}|${delayMs}[a${inputIdx}]`,
+        );
         mixRefs.push(`[a${inputIdx}]`);
       } else {
         mixRefs.push(`[${inputIdx}:a]`);
@@ -468,7 +566,9 @@ export const ffmpeg = {
     args.push("-f", "wav");
     args.push(outputPath);
 
-    console.log(`[ffmpeg] mixAudioAbsolute: ${audioSegments.length} segments via adelay+amix (normalize=0)`);
+    console.log(
+      `[ffmpeg] mixAudioAbsolute: ${audioSegments.length} segments via adelay+amix (normalize=0)`,
+    );
 
     return new Promise((resolve, reject) => {
       const proc = spawn(ffmpegBin, args);
@@ -485,7 +585,9 @@ export const ffmpeg = {
           return;
         }
         const outSize = fs.statSync(outputPath).size;
-        console.log(`[ffmpeg] Mixed absolute audio: ${(outSize / 1024).toFixed(0)}KB`);
+        console.log(
+          `[ffmpeg] Mixed absolute audio: ${(outSize / 1024).toFixed(0)}KB`,
+        );
         resolve(outputPath);
       });
 
@@ -537,14 +639,20 @@ export const ffmpeg = {
     return new Promise((resolve, reject) => {
       const args = [
         "-y",
-        "-i", speechPath,
-        "-i", backgroundPath,
+        "-i",
+        speechPath,
+        "-i",
+        backgroundPath,
         "-filter_complex",
         "[0:a][1:a]amix=inputs=2:duration=longest:normalize=0[out]",
-        "-map", "[out]",
-        "-ac", "2",
-        "-ar", "44100",
-        "-f", "wav",
+        "-map",
+        "[out]",
+        "-ac",
+        "2",
+        "-ar",
+        "44100",
+        "-f",
+        "wav",
         outputPath,
       ];
 
@@ -552,7 +660,9 @@ export const ffmpeg = {
 
       const proc = spawn(ffmpegBin, args);
       let stderr = "";
-      proc.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
+      proc.stderr.on("data", (data: Buffer) => {
+        stderr += data.toString();
+      });
 
       proc.on("close", (code: number | null) => {
         if (code !== 0) {
@@ -561,7 +671,9 @@ export const ffmpeg = {
           return;
         }
         const outSize = fs.statSync(outputPath).size;
-        console.log(`[ffmpeg] Pre-mixed audio: ${(outSize / 1024 / 1024).toFixed(1)}MB`);
+        console.log(
+          `[ffmpeg] Pre-mixed audio: ${(outSize / 1024 / 1024).toFixed(1)}MB`,
+        );
         resolve(outputPath);
       });
 
@@ -577,32 +689,40 @@ export const ffmpeg = {
    * is essentially silence and background mixing should be skipped.
    * Per D-07: If background extraction produces garbage, fall back to speech-only.
    */
-  async isBackgroundMeaningful(
-    backgroundPath: string,
-  ): Promise<boolean> {
+  async isBackgroundMeaningful(backgroundPath: string): Promise<boolean> {
     const ffmpegBin = ffmpegPath ?? "ffmpeg";
 
     return new Promise((resolve) => {
       const args = [
-        "-i", backgroundPath,
-        "-af", "volumedetect",
-        "-f", "null", "-",
+        "-i",
+        backgroundPath,
+        "-af",
+        "volumedetect",
+        "-f",
+        "null",
+        "-",
       ];
 
       const proc = spawn(ffmpegBin, args);
       let stderr = "";
-      proc.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
+      proc.stderr.on("data", (data: Buffer) => {
+        stderr += data.toString();
+      });
 
       proc.on("close", () => {
         const match = stderr.match(/mean_volume:\s*([-\d.]+)\s*dB/);
         if (match) {
           const meanDb = parseFloat(match[1]);
           const meaningful = meanDb > -55;
-          console.log(`[ffmpeg] Background mean volume: ${meanDb.toFixed(1)}dB — ${meaningful ? "meaningful" : "silence (skipping)"}`);
+          console.log(
+            `[ffmpeg] Background mean volume: ${meanDb.toFixed(1)}dB — ${meaningful ? "meaningful" : "silence (skipping)"}`,
+          );
           resolve(meaningful);
         } else {
           // Can't determine -- assume meaningful to avoid silently dropping audio
-          console.log(`[ffmpeg] Could not determine background volume — assuming meaningful`);
+          console.log(
+            `[ffmpeg] Could not determine background volume — assuming meaningful`,
+          );
           resolve(true);
         }
       });
@@ -645,7 +765,9 @@ export const ffmpeg = {
           resolve(false);
           return;
         }
-        const audioStream = metadata.streams?.find((s) => s.codec_type === "audio");
+        const audioStream = metadata.streams?.find(
+          (s) => s.codec_type === "audio",
+        );
         resolve(!!audioStream);
       });
     });
@@ -654,8 +776,240 @@ export const ffmpeg = {
       return { valid: false, reason: "Output has no audio stream" };
     }
 
-    console.log(`[ffmpeg] Merge quality check passed: ${actualDuration.toFixed(1)}s, ${(stat.size / 1024 / 1024).toFixed(1)}MB`);
+    console.log(
+      `[ffmpeg] Merge quality check passed: ${actualDuration.toFixed(1)}s, ${(stat.size / 1024 / 1024).toFixed(1)}MB`,
+    );
     return { valid: true };
+  },
+
+  /**
+   * Phase 13: Loudness profile presets for different delivery platforms.
+   */
+  LOUDNESS_PROFILES: {
+    WEB: { targetI: -14, targetLRA: 11, targetTP: -1 },
+    STREAMING: { targetI: -24, targetLRA: 15, targetTP: -2 },
+    BROADCAST: { targetI: -27, targetLRA: 15, targetTP: -2 },
+  } as Record<string, { targetI: number; targetLRA: number; targetTP: number }>,
+
+  /**
+   * Phase 13: Measure audio loudness using EBU R128 (loudnorm first pass).
+   * Returns integrated loudness (LUFS), loudness range, true peak, and threshold.
+   */
+  async measureLoudness(inputPath: string): Promise<{
+    input_i: number;
+    input_lra: number;
+    input_tp: number;
+    input_thresh: number;
+  }> {
+    const ffmpegBin = ffmpegPath ?? "ffmpeg";
+
+    return new Promise((resolve, reject) => {
+      const args = [
+        "-i",
+        inputPath,
+        "-af",
+        "loudnorm=I=-14:LRA=11:TP=-1:print_format=json",
+        "-f",
+        "null",
+        "-",
+      ];
+
+      const proc = spawn(ffmpegBin, args);
+      let stderr = "";
+      proc.stderr.on("data", (data: Buffer) => {
+        stderr += data.toString();
+      });
+
+      proc.on("close", (code: number | null) => {
+        // loudnorm prints JSON to stderr even on success
+        const jsonMatch = stderr.match(/\{[\s\S]*"input_i"[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            const data = JSON.parse(jsonMatch[0]);
+            const result = {
+              input_i: parseFloat(data.input_i),
+              input_lra: parseFloat(data.input_lra),
+              input_tp: parseFloat(data.input_tp),
+              input_thresh: parseFloat(data.input_thresh),
+            };
+            console.log(
+              `[ffmpeg] Loudness measurement: ${result.input_i.toFixed(1)} LUFS, ` +
+                `LRA: ${result.input_lra.toFixed(1)}, TP: ${result.input_tp.toFixed(1)} dBTP`,
+            );
+            resolve(result);
+            return;
+          } catch {
+            // Fall through to reject
+          }
+        }
+        reject(new Error(`Failed to parse loudnorm output (code ${code})`));
+      });
+
+      proc.on("error", (err: Error) => {
+        reject(
+          new Error(`Failed to start ffmpeg measureLoudness: ${err.message}`),
+        );
+      });
+    });
+  },
+
+  /**
+   * Phase 13: Two-pass EBU R128 loudness normalization.
+   * First measures, then applies correction for precise LUFS targeting.
+   * @param inputPath - Input audio file
+   * @param outputPath - Output normalized audio file
+   * @param profile - Loudness profile name (WEB, STREAMING, BROADCAST) or custom targets
+   */
+  async normalizeLoudness(
+    inputPath: string,
+    outputPath: string,
+    profile:
+      | string
+      | { targetI: number; targetLRA: number; targetTP: number } = "WEB",
+  ): Promise<string> {
+    const ffmpegBin = ffmpegPath ?? "ffmpeg";
+    const targets =
+      typeof profile === "string"
+        ? (this.LOUDNESS_PROFILES[profile] ?? this.LOUDNESS_PROFILES.WEB)
+        : profile;
+
+    // Pass 1: Measure current loudness
+    const measured = await this.measureLoudness(inputPath);
+
+    // Pass 2: Apply correction with measured values
+    return new Promise((resolve, reject) => {
+      const filter =
+        `loudnorm=I=${targets.targetI}:LRA=${targets.targetLRA}:TP=${targets.targetTP}:` +
+        `measured_I=${measured.input_i}:measured_LRA=${measured.input_lra}:` +
+        `measured_TP=${measured.input_tp}:measured_thresh=${measured.input_thresh}`;
+
+      const args = [
+        "-y",
+        "-i",
+        inputPath,
+        "-af",
+        filter,
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
+        "-f",
+        "wav",
+        outputPath,
+      ];
+
+      console.log(
+        `[ffmpeg] Normalizing loudness: ${measured.input_i.toFixed(1)} LUFS -> ${targets.targetI} LUFS (profile: ${typeof profile === "string" ? profile : "custom"})`,
+      );
+
+      const proc = spawn(ffmpegBin, args);
+      let stderr = "";
+      proc.stderr.on("data", (data: Buffer) => {
+        stderr += data.toString();
+      });
+
+      proc.on("close", (code: number | null) => {
+        if (code !== 0) {
+          console.error(
+            `[ffmpeg] normalizeLoudness stderr:\n${stderr.slice(-500)}`,
+          );
+          reject(
+            new Error(`FFmpeg normalizeLoudness failed with code ${code}`),
+          );
+          return;
+        }
+        console.log(`[ffmpeg] Loudness normalized to ${targets.targetI} LUFS`);
+        resolve(outputPath);
+      });
+
+      proc.on("error", (err: Error) => {
+        reject(
+          new Error(`Failed to start ffmpeg normalizeLoudness: ${err.message}`),
+        );
+      });
+    });
+  },
+
+  /**
+   * Phase 13: Dynamic sidechain ducking — reduce background only when speech is present.
+   * Uses FFmpeg sidechaincompress: background volume is compressed when speech signal exceeds threshold.
+   * Much more natural than flat volume reduction — background plays at near-original level during gaps.
+   * @param speechPath - Synthesized speech audio (the sidechain signal)
+   * @param backgroundPath - Background music/SFX audio (gets ducked)
+   * @param outputPath - Output with speech + dynamically ducked background
+   * @param speechToBackgroundDb - Target dB difference between speech and background (default: 10)
+   */
+  async sidechainDuck(
+    speechPath: string,
+    backgroundPath: string,
+    outputPath: string,
+    speechToBackgroundDb: number = 10,
+  ): Promise<string> {
+    const ffmpegBin = ffmpegPath ?? "ffmpeg";
+
+    return new Promise((resolve, reject) => {
+      // sidechaincompress: background is ducked when speech level exceeds threshold
+      // threshold=0.015 — triggers on any audible speech
+      // ratio=6 — strong compression (effective ducking)
+      // attack=200ms — fades background down quickly when speech starts
+      // release=1000ms — background fades back up slowly after speech ends (natural)
+      // makeup=1 — no makeup gain on the compressed signal
+      const filter =
+        `[1:a]aformat=sample_rates=44100:channel_layouts=stereo[bg];` +
+        `[0:a]aformat=sample_rates=44100:channel_layouts=stereo[speech];` +
+        `[bg][speech]sidechaincompress=threshold=0.015:ratio=6:attack=200:release=1000:level_sc=1[ducked];` +
+        `[speech][ducked]amix=inputs=2:duration=longest:normalize=0[out]`;
+
+      const args = [
+        "-y",
+        "-i",
+        speechPath,
+        "-i",
+        backgroundPath,
+        "-filter_complex",
+        filter,
+        "-map",
+        "[out]",
+        "-ac",
+        "2",
+        "-ar",
+        "44100",
+        "-f",
+        "wav",
+        outputPath,
+      ];
+
+      console.log(
+        `[ffmpeg] Sidechain ducking: speech controls background compression (target: ${speechToBackgroundDb}dB speech-to-bg ratio)`,
+      );
+
+      const proc = spawn(ffmpegBin, args);
+      let stderr = "";
+      proc.stderr.on("data", (data: Buffer) => {
+        stderr += data.toString();
+      });
+
+      proc.on("close", (code: number | null) => {
+        if (code !== 0) {
+          console.error(
+            `[ffmpeg] sidechainDuck stderr:\n${stderr.slice(-500)}`,
+          );
+          reject(new Error(`FFmpeg sidechainDuck failed with code ${code}`));
+          return;
+        }
+        const outSize = fs.statSync(outputPath).size;
+        console.log(
+          `[ffmpeg] Sidechain ducked audio: ${(outSize / 1024 / 1024).toFixed(1)}MB`,
+        );
+        resolve(outputPath);
+      });
+
+      proc.on("error", (err: Error) => {
+        reject(
+          new Error(`Failed to start ffmpeg sidechainDuck: ${err.message}`),
+        );
+      });
+    });
   },
 
   /**

@@ -47,7 +47,9 @@ model Translation {
   translatedJson      Json?
   synthesizedAudioKey String?
   backgroundAudioKey  String?
+  vocalsAudioKey      String?
   enableBackgroundMix Boolean           @default(true)
+  loudnessProfile     String            @default("WEB")
   failedSegments      Json?
   failedSegmentCount  Int               @default(0)
   resultVideoKey      String?
