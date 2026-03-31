@@ -281,15 +281,22 @@ export const ffmpeg = {
           .save(outputPath);
       });
     } else {
-      // Pad with silence to reach exact target using apad filter
+      // Audio is shorter than target after stretching.
+      // DON'T pad with silence — let mixAudioAbsolute handle the natural gap.
+      // Just add a gentle fade-out at the end to avoid clicks.
+      const fadeStart = Math.max(0, actualDuration - 0.1);
+      console.warn(
+        `[ffmpeg] timeStretchExact: audio shorter than target after stretch ` +
+        `(${actualDuration.toFixed(2)}s vs ${targetDurationSec.toFixed(2)}s) — fade-out applied, no silence padding`
+      );
       await new Promise<void>((resolve, reject) => {
         Ffmpeg(stretchedTmp)
-          .audioFilters(`apad=whole_dur=${targetDurationSec.toFixed(3)}`)
+          .audioFilters(`afade=t=out:st=${fadeStart.toFixed(3)}:d=0.1`)
           .audioChannels(1)
           .audioFrequency(44100)
           .format("wav")
           .on("error", (err) =>
-            reject(new Error(`FFmpeg pad failed: ${err.message}`)),
+            reject(new Error(`FFmpeg fade failed: ${err.message}`)),
           )
           .on("end", () => {
             if (fs.existsSync(stretchedTmp)) fs.unlinkSync(stretchedTmp);
