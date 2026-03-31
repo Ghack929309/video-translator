@@ -27,7 +27,9 @@ function schedulePodShutdown() {
 
   if (!env.RUNPOD_POD_ID) return;
 
-  console.log(`[pipeline] Pod shutdown scheduled in 20 minutes (cancel if new job starts)`);
+  console.log(
+    `[pipeline] Pod shutdown scheduled in 20 minutes (cancel if new job starts)`,
+  );
 
   podShutdownTimer = setTimeout(async () => {
     podShutdownTimer = null;
@@ -41,11 +43,15 @@ function schedulePodShutdown() {
       });
 
       if (activeJobs > 0) {
-        console.log(`[pipeline] Pod shutdown cancelled — ${activeJobs} active job(s)`);
+        console.log(
+          `[pipeline] Pod shutdown cancelled — ${activeJobs} active job(s)`,
+        );
         return;
       }
 
-      console.log(`[pipeline] Pod idle for 20 minutes — stopping to save billing...`);
+      console.log(
+        `[pipeline] Pod idle for 20 minutes — stopping to save billing...`,
+      );
       await runpodApi.stopPod(env.RUNPOD_POD_ID!);
     } catch (err) {
       console.error(`[pipeline] Failed to stop pod after idle timeout:`, err);
@@ -133,6 +139,63 @@ async function withRetry(
 }
 
 /**
+ * Split translated segments longer than MAX_SEGMENT_SEC at sentence boundaries.
+ * Long utterances (30+ seconds) cause CosyVoice to truncate or produce artifacts.
+ * Splitting preserves proportional timing for each sub-segment.
+ * Per Phase 12 research, Pitfall 5.
+ */
+const MAX_SEGMENT_SEC = 15;
+
+interface TranslatedSegment {
+  translatedText: string;
+  start: number;
+  end: number;
+  speaker?: string;
+}
+
+function splitLongSegments(segments: TranslatedSegment[]): TranslatedSegment[] {
+  const result: TranslatedSegment[] = [];
+  for (const seg of segments) {
+    const durationSec = (seg.end - seg.start) / 1000;
+    if (durationSec <= MAX_SEGMENT_SEC) {
+      result.push(seg);
+      continue;
+    }
+    // Split at sentence boundaries (period, exclamation, question mark followed by space)
+    const sentences = seg.translatedText.split(/(?<=[.!?])\s+/);
+    if (sentences.length <= 1) {
+      // Can't split further — use as-is and let TTS handle it
+      console.warn(
+        `[pipeline] Segment at ${(seg.start / 1000).toFixed(1)}s is ${durationSec.toFixed(1)}s ` +
+          `but cannot be split (single sentence)`,
+      );
+      result.push(seg);
+      continue;
+    }
+    // Distribute timing proportionally by character count
+    const totalChars = sentences.reduce((sum, s) => sum + s.length, 0);
+    let currentStart = seg.start;
+    for (let j = 0; j < sentences.length; j++) {
+      const sentence = sentences[j];
+      const fraction = sentence.length / totalChars;
+      const subDurationMs = fraction * (seg.end - seg.start);
+      const subEnd = Math.round(currentStart + subDurationMs);
+      result.push({
+        ...seg,
+        translatedText: sentence.trim(),
+        start: Math.round(currentStart),
+        end: Math.min(subEnd, seg.end),
+      });
+      currentStart = subEnd;
+    }
+    console.log(
+      `[pipeline] Split ${durationSec.toFixed(1)}s segment into ${sentences.length} sub-segments`,
+    );
+  }
+  return result;
+}
+
+/**
  * Pipeline orchestrator — runs translation steps sequentially.
  * Each step is idempotent and wrapped in retry logic with exponential backoff.
  * Supports resuming from the last failed step on retry.
@@ -181,7 +244,11 @@ export const pipeline = {
     try {
       // Phase 9: Pre-Heating (Run immediately. If the physical host lacks GPUs, immediately abort before wasting third-party credits)
       // SEPARATE_AUDIO (index 2) also needs the pod for Demucs, so start pod if we haven't passed SYNTHESIZE yet
-      if (translation.ttsEngine === "COSYVOICE" && env.RUNPOD_POD_ID && startIndex <= 6) {
+      if (
+        translation.ttsEngine === "COSYVOICE" &&
+        env.RUNPOD_POD_ID &&
+        startIndex <= 6
+      ) {
         console.log(`[pipeline] Waking CosyVoice Pod...`);
         try {
           await runpodApi.startPod(env.RUNPOD_POD_ID);
@@ -189,7 +256,7 @@ export const pipeline = {
           console.error("[pipeline] Pre-heat startPod failed:", err);
           throw new Error(
             "RunPod infrastructure is currently at maximum capacity (No free GPUs on your Pod's host machine). " +
-            "Please click Retry on this translation in a few minutes once capacity clears up."
+              "Please click Retry on this translation in a few minutes once capacity clears up.",
           );
         }
       }
@@ -291,10 +358,11 @@ export const pipeline = {
     console.log(
       `[pipeline] Step DOWNLOAD — downloading from ${video.sourceUrl}`,
     );
-    const { filePath, mimeType, title: videoTitle } = await ytdlp.download(
-      video.sourceUrl,
-      video.id,
-    );
+    const {
+      filePath,
+      mimeType,
+      title: videoTitle,
+    } = await ytdlp.download(video.sourceUrl, video.id);
 
     // Upload downloaded file to Tigris
     const storageKey = `videos/${video.id}/source.mp4`;
@@ -423,7 +491,9 @@ export const pipeline = {
 
     // Skip if already separated
     if (translation.backgroundAudioKey) {
-      console.log(`[pipeline] Step SEPARATE_AUDIO skipped — background already separated`);
+      console.log(
+        `[pipeline] Step SEPARATE_AUDIO skipped — background already separated`,
+      );
       await updateTranslation(translationId, {
         currentStep: "SEPARATE_AUDIO",
         progress: STEP_PROGRESS.SEPARATE_AUDIO,
@@ -433,7 +503,9 @@ export const pipeline = {
 
     // Skip if background mixing is disabled
     if (!translation.enableBackgroundMix) {
-      console.log(`[pipeline] Step SEPARATE_AUDIO skipped — background mixing disabled by user`);
+      console.log(
+        `[pipeline] Step SEPARATE_AUDIO skipped — background mixing disabled by user`,
+      );
       await updateTranslation(translationId, {
         currentStep: "SEPARATE_AUDIO",
         progress: STEP_PROGRESS.SEPARATE_AUDIO,
@@ -446,7 +518,9 @@ export const pipeline = {
       progress: 18,
     });
 
-    console.log(`[pipeline] Step SEPARATE_AUDIO — extracting background audio via Demucs`);
+    console.log(
+      `[pipeline] Step SEPARATE_AUDIO — extracting background audio via Demucs`,
+    );
 
     const tmpDir = path.join(os.tmpdir(), "dubly", translationId);
     fs.mkdirSync(tmpDir, { recursive: true });
@@ -460,8 +534,11 @@ export const pipeline = {
         if (fs.existsSync(altVideoPath)) {
           videoPath = altVideoPath;
         } else {
-          const videoStream = await tigris.download(translation.video.storageKey);
-          if (!videoStream) throw new Error("Failed to download source video for separation");
+          const videoStream = await tigris.download(
+            translation.video.storageKey,
+          );
+          if (!videoStream)
+            throw new Error("Failed to download source video for separation");
           const vws = fs.createWriteStream(videoPath);
           for await (const chunk of videoStream as AsyncIterable<Uint8Array>) {
             vws.write(chunk);
@@ -472,7 +549,10 @@ export const pipeline = {
       }
 
       // Step 2: Extract full-quality audio (44.1kHz stereo) per D-03
-      const fullQualityPath = await ffmpeg.extractAudioFullQuality(videoPath, translationId);
+      const fullQualityPath = await ffmpeg.extractAudioFullQuality(
+        videoPath,
+        translationId,
+      );
 
       // Step 3: Ensure GPU pod is ready (Demucs runs on same pod)
       if (env.RUNPOD_POD_ID) {
@@ -488,7 +568,9 @@ export const pipeline = {
 
       const meaningful = await ffmpeg.isBackgroundMeaningful(bgPath);
       if (!meaningful) {
-        console.log(`[pipeline] Background track is silence — skipping background mixing`);
+        console.log(
+          `[pipeline] Background track is silence — skipping background mixing`,
+        );
         await updateTranslation(translationId, {
           currentStep: "SEPARATE_AUDIO",
           progress: STEP_PROGRESS.SEPARATE_AUDIO,
@@ -507,11 +589,15 @@ export const pipeline = {
         progress: STEP_PROGRESS.SEPARATE_AUDIO,
       });
 
-      console.log(`[pipeline] Step SEPARATE_AUDIO complete — background stored at ${bgKey}`);
+      console.log(
+        `[pipeline] Step SEPARATE_AUDIO complete — background stored at ${bgKey}`,
+      );
     } catch (err) {
       // Per D-07: If background extraction fails, fall back silently to speech-only
       const message = err instanceof Error ? err.message : "Unknown error";
-      console.warn(`[pipeline] SEPARATE_AUDIO failed — falling back to speech-only: ${message}`);
+      console.warn(
+        `[pipeline] SEPARATE_AUDIO failed — falling back to speech-only: ${message}`,
+      );
       await updateTranslation(translationId, {
         currentStep: "SEPARATE_AUDIO",
         progress: STEP_PROGRESS.SEPARATE_AUDIO,
@@ -748,11 +834,16 @@ export const pipeline = {
       const segments = speakerSegments.get(speaker)!;
 
       // Ensure pristine embeddings: Find the single longest clean segment instead of micro-stitching cuts
-      let bestSegment: { start: number; end: number; duration: number } | null = null;
+      let bestSegment: { start: number; end: number; duration: number } | null =
+        null;
       for (const seg of segments) {
         const durationSec = (seg.end - seg.start) / 1000;
         if (!bestSegment || durationSec > bestSegment.duration) {
-          bestSegment = { start: seg.start, end: seg.end, duration: durationSec };
+          bestSegment = {
+            start: seg.start,
+            end: seg.end,
+            duration: durationSec,
+          };
         }
       }
 
@@ -774,7 +865,12 @@ export const pipeline = {
         tmpDir,
         `speaker-${speaker}-sample.wav`,
       );
-      await ffmpeg.extractTimeRange(audioPath, startSec, endSec, speakerSamplePath);
+      await ffmpeg.extractTimeRange(
+        audioPath,
+        startSec,
+        endSec,
+        speakerSamplePath,
+      );
       const totalDuration = endSec - startSec;
 
       if (isCosyVoice) {
@@ -787,10 +883,7 @@ export const pipeline = {
         );
       } else {
         // Fish Audio: compress, and create persistent voice model
-        const trimmedPath = path.join(
-          tmpDir,
-          `speaker-${speaker}-trimmed.mp3`,
-        );
+        const trimmedPath = path.join(tmpDir, `speaker-${speaker}-trimmed.mp3`);
         await ffmpeg.trimAndCompress(speakerSamplePath, trimmedPath, 30);
 
         const voiceId = await fishAudio.createVoiceModel(
@@ -854,7 +947,9 @@ export const pipeline = {
 
     // Skip if already synthesized
     if (translation.synthesizedAudioKey) {
-      console.log(`[pipeline] Step SYNTHESIZE skipped — audio already synthesized`);
+      console.log(
+        `[pipeline] Step SYNTHESIZE skipped — audio already synthesized`,
+      );
       await updateTranslation(translationId, {
         currentStep: "SYNTHESIZE",
         progress: STEP_PROGRESS.SYNTHESIZE,
@@ -878,7 +973,9 @@ export const pipeline = {
       }
     }
     if (!translation.translatedJson) {
-      throw new Error("No translated JSON — TRANSLATE step may have been skipped");
+      throw new Error(
+        "No translated JSON — TRANSLATE step may have been skipped",
+      );
     }
 
     await updateTranslation(translationId, {
@@ -902,8 +999,12 @@ export const pipeline = {
         voiceMap = JSON.parse(fs.readFileSync(refsManifest, "utf-8"));
         defaultVoiceRef = Object.values(voiceMap)[0];
       } else {
-        voiceMap = (translation.fishAudioVoiceMap ?? {}) as Record<string, string>;
-        defaultVoiceRef = translation.fishAudioVoiceId ?? Object.values(voiceMap)[0];
+        voiceMap = (translation.fishAudioVoiceMap ?? {}) as Record<
+          string,
+          string
+        >;
+        defaultVoiceRef =
+          translation.fishAudioVoiceId ?? Object.values(voiceMap)[0];
       }
 
       const transcriptMeta = translation.transcriptJson as unknown as {
@@ -918,20 +1019,30 @@ export const pipeline = {
         speaker?: string;
       }[];
 
+      // Split long segments at sentence boundaries to avoid TTS truncation (Phase 12, Pitfall 5)
+      const splitSegments = splitLongSegments(segments);
+      if (splitSegments.length !== segments.length) {
+        console.log(
+          `[pipeline] Split ${segments.length} segments into ${splitSegments.length} sub-segments`,
+        );
+      }
+
       console.log(
-        `[pipeline] Step SYNTHESIZE — generating ${segments.length} TTS segments (engine: ${isCosyVoice ? "CosyVoice" : "Fish Audio"})`,
+        `[pipeline] Step SYNTHESIZE — generating ${splitSegments.length} TTS segments (engine: ${isCosyVoice ? "CosyVoice" : "Fish Audio"})`,
       );
 
       // Debug: log the segment timeline
-      for (let i = 0; i < Math.min(segments.length, 10); i++) {
-        const s = segments[i];
+      for (let i = 0; i < Math.min(splitSegments.length, 10); i++) {
+        const s = splitSegments[i];
         console.log(
           `[pipeline] Segment ${i}: start=${(s.start / 1000).toFixed(1)}s end=${(s.end / 1000).toFixed(1)}s ` +
-          `dur=${((s.end - s.start) / 1000).toFixed(1)}s text="${s.translatedText.slice(0, 60)}..."`,
+            `dur=${((s.end - s.start) / 1000).toFixed(1)}s text="${s.translatedText.slice(0, 60)}..."`,
         );
       }
-      if (segments.length > 10) {
-        console.log(`[pipeline] ... and ${segments.length - 10} more segments`);
+      if (splitSegments.length > 10) {
+        console.log(
+          `[pipeline] ... and ${splitSegments.length - 10} more segments`,
+        );
       }
 
       fs.mkdirSync(tmpDir, { recursive: true });
@@ -940,17 +1051,20 @@ export const pipeline = {
       const failedSegments: { index: number; error: string }[] = [];
 
       const audioParts: { path: string; startMs: number }[] = [];
-      for (let i = 0; i < segments.length; i++) {
-        const seg = segments[i];
+      for (let i = 0; i < splitSegments.length; i++) {
+        const seg = splitSegments[i];
         const segDurationSec = (seg.end - seg.start) / 1000;
-        const nextSegStart = i + 1 < segments.length ? segments[i + 1].start : (translation.video.durationSec ?? 0) * 1000;
+        const nextSegStart =
+          i + 1 < splitSegments.length
+            ? splitSegments[i + 1].start
+            : (translation.video.durationSec ?? 0) * 1000;
 
         const rawPath = path.join(tmpDir, `tts-raw-${i}.wav`);
         const stretchedPath = path.join(tmpDir, `tts-stretched-${i}.wav`);
 
         // Skip empty segments
         if (!seg.translatedText || seg.translatedText.trim().length === 0) {
-          const segProgress = 70 + Math.round((i / segments.length) * 10);
+          const segProgress = 70 + Math.round((i / splitSegments.length) * 10);
           await updateTranslation(translationId, { progress: segProgress });
           continue;
         }
@@ -984,63 +1098,102 @@ export const pipeline = {
           fs.writeFileSync(rawPath, audioBuffer);
           const actualGeneratedSec = await ffmpeg.getDuration(rawPath);
 
-          // Per D-16: Gap-aware pacing
-          const gapSec = (nextSegStart - seg.end) / 1000;
+          // Phase 12: Revised gap-aware pacing — always enforce segment duration
+          const targetDurationSec = segDurationSec;
+          const tolerance = 0.1; // 10% tolerance
+          const relativeDiff =
+            Math.abs(actualGeneratedSec - targetDurationSec) /
+            targetDurationSec;
 
-          if (gapSec > 0 && actualGeneratedSec <= segDurationSec + gapSec) {
-            // There IS a gap and generated audio fits within segment + gap
-            // Use as-is — natural overflow into gap (no stretching needed)
+          if (relativeDiff < tolerance) {
+            // Within 10% of target — use as-is (no stretching needed)
             audioParts.push({ path: rawPath, startMs: seg.start });
-          } else {
-            // No gap OR generated audio overflows beyond segment + gap
-            // Per D-17: Apply timeStretchExact to fit within segment duration (0.7x-1.5x limits)
-            if (Math.abs(actualGeneratedSec - segDurationSec) < 0.1) {
-              // Close enough, no stretching needed
+            console.log(
+              `[pipeline] Seg ${i}: target=${targetDurationSec.toFixed(2)}s ` +
+                `actual=${actualGeneratedSec.toFixed(2)}s — within ${(tolerance * 100).toFixed(0)}% tolerance, using as-is`,
+            );
+          } else if (actualGeneratedSec > targetDurationSec) {
+            // TTS is LONGER than segment
+            const gapSec = (nextSegStart - seg.end) / 1000;
+            if (
+              gapSec > 0 &&
+              actualGeneratedSec <= targetDurationSec + gapSec * 0.8
+            ) {
+              // Fits within segment + 80% of gap — allow natural overflow
               audioParts.push({ path: rawPath, startMs: seg.start });
+              console.log(
+                `[pipeline] Seg ${i}: overflow into gap ` +
+                  `(${actualGeneratedSec.toFixed(2)}s into ${targetDurationSec.toFixed(2)}s + ${gapSec.toFixed(2)}s gap)`,
+              );
             } else {
+              // Too long even with gap — speed up to fit in segment
               const { outputPath: finalPath } = await ffmpeg.timeStretchExact(
                 rawPath,
-                segDurationSec,
+                targetDurationSec,
                 stretchedPath,
               );
               audioParts.push({ path: finalPath, startMs: seg.start });
+              console.log(
+                `[pipeline] Seg ${i}: sped up ${actualGeneratedSec.toFixed(2)}s -> ${targetDurationSec.toFixed(2)}s`,
+              );
             }
+          } else {
+            // TTS is SHORTER than segment — stretch to fill the slot
+            const { outputPath: finalPath } = await ffmpeg.timeStretchExact(
+              rawPath,
+              targetDurationSec,
+              stretchedPath,
+            );
+            audioParts.push({ path: finalPath, startMs: seg.start });
+            console.log(
+              `[pipeline] Seg ${i}: stretched ${actualGeneratedSec.toFixed(2)}s -> ${targetDurationSec.toFixed(2)}s`,
+            );
           }
         } catch (err) {
           // Per D-12: Fall back to silence for failed segments
-          const errorMsg = err instanceof Error ? err.message : "Unknown TTS error";
+          const errorMsg =
+            err instanceof Error ? err.message : "Unknown TTS error";
           console.warn(`[pipeline] TTS failed for segment ${i}: ${errorMsg}`);
           failedSegments.push({ index: i, error: errorMsg });
 
           // Per D-14: If >50% of segments fail, abort entirely
-          if (failedSegments.length > segments.length / 2) {
-            console.error(`[pipeline] >50% segments failed (${failedSegments.length}/${segments.length}) — aborting job`);
+          if (failedSegments.length > splitSegments.length / 2) {
+            console.error(
+              `[pipeline] >50% segments failed (${failedSegments.length}/${splitSegments.length}) — aborting job`,
+            );
             await updateTranslation(translationId, {
               failedSegments: failedSegments,
               failedSegmentCount: failedSegments.length,
             });
             throw new Error(
-              `TTS failed for ${failedSegments.length} of ${segments.length} segments (>50%). ` +
-              `Last error: ${errorMsg}`,
+              `TTS failed for ${failedSegments.length} of ${splitSegments.length} segments (>50%). ` +
+                `Last error: ${errorMsg}`,
             );
           }
         }
 
         // Rate-limit between TTS calls
-        if (i < segments.length - 1) {
+        if (i < splitSegments.length - 1) {
           await new Promise((r) => setTimeout(r, 150));
         }
 
         // Progress updates (batch every 5 segments)
-        if (i % 5 === 0 || i === segments.length - 1) {
-          const segProgress = 70 + Math.round((i / segments.length) * 10);
+        if (i % 5 === 0 || i === splitSegments.length - 1) {
+          const segProgress = 70 + Math.round((i / splitSegments.length) * 10);
           await updateTranslation(translationId, { progress: segProgress });
         }
       }
 
+      console.log(
+        `[pipeline] Synthesis complete: ${audioParts.length} audio parts from ${splitSegments.length} segments ` +
+          `(${failedSegments.length} failed)`,
+      );
+
       // Per D-13: Store failed segment info in DB
       if (failedSegments.length > 0) {
-        console.warn(`[pipeline] ${failedSegments.length} of ${segments.length} segments failed TTS — using silence for those segments`);
+        console.warn(
+          `[pipeline] ${failedSegments.length} of ${splitSegments.length} segments failed TTS — using silence for those segments`,
+        );
         await updateTranslation(translationId, {
           failedSegments: failedSegments,
           failedSegmentCount: failedSegments.length,
@@ -1049,7 +1202,33 @@ export const pipeline = {
 
       // Per D-18: Absolute time mixing (layer overlapping speakers naturally)
       const synthesizedPath = path.join(tmpDir, "synthesized.wav");
-      await ffmpeg.mixAudioAbsolute(audioParts, synthesizedPath, translation.video.durationSec ?? undefined);
+      await ffmpeg.mixAudioAbsolute(
+        audioParts,
+        synthesizedPath,
+        translation.video.durationSec ?? undefined,
+      );
+
+      // Phase 12: Post-synthesis timeline validation
+      const synthDuration = await ffmpeg.getDuration(synthesizedPath);
+      const lastSegEndMs = Math.max(...splitSegments.map((s) => s.end));
+      const lastSegEndSec = lastSegEndMs / 1000;
+      const videoDurationSec = translation.video.durationSec ?? 0;
+
+      console.log(
+        `[pipeline] Timeline validation:\n` +
+          `  Synthesized audio duration: ${synthDuration.toFixed(1)}s\n` +
+          `  Last segment ends at:       ${lastSegEndSec.toFixed(1)}s\n` +
+          `  Video duration:             ${videoDurationSec.toFixed(1)}s\n` +
+          `  Speech coverage:            ${((lastSegEndSec / videoDurationSec) * 100).toFixed(0)}% of video\n` +
+          `  Audio vs last segment:      ${synthDuration >= lastSegEndSec ? "OK" : "SHORT by " + (lastSegEndSec - synthDuration).toFixed(1) + "s"}`,
+      );
+
+      if (synthDuration < lastSegEndSec * 0.8) {
+        console.warn(
+          `[pipeline] WARNING: Synthesized audio (${synthDuration.toFixed(1)}s) is significantly ` +
+            `shorter than last segment end (${lastSegEndSec.toFixed(1)}s) — timing drift may be present`,
+        );
+      }
 
       // Upload to Tigris
       const audioKey = `translations/${translationId}/synthesized-audio.wav`;
@@ -1061,7 +1240,9 @@ export const pipeline = {
         progress: STEP_PROGRESS.SYNTHESIZE,
       });
 
-      console.log(`[pipeline] Step SYNTHESIZE complete — stored at ${audioKey}`);
+      console.log(
+        `[pipeline] Step SYNTHESIZE complete — stored at ${audioKey}`,
+      );
     } finally {
       if (isCosyVoice && env.RUNPOD_POD_ID) {
         schedulePodShutdown();
@@ -1084,7 +1265,9 @@ export const pipeline = {
 
     // Skip if already merged
     if (translation.resultVideoKey) {
-      console.log(`[pipeline] Step MERGE skipped — result video already exists`);
+      console.log(
+        `[pipeline] Step MERGE skipped — result video already exists`,
+      );
       await updateTranslation(translationId, {
         currentStep: "MERGE",
         progress: STEP_PROGRESS.MERGE,
@@ -1093,7 +1276,9 @@ export const pipeline = {
     }
 
     if (!translation.synthesizedAudioKey) {
-      throw new Error("No synthesized audio key — SYNTHESIZE step may have been skipped");
+      throw new Error(
+        "No synthesized audio key — SYNTHESIZE step may have been skipped",
+      );
     }
 
     await updateTranslation(translationId, {
@@ -1144,7 +1329,9 @@ export const pipeline = {
     );
 
     if (audioSize < 100) {
-      throw new Error(`Synthesized audio file is too small (${audioSize} bytes) — likely empty`);
+      throw new Error(
+        `Synthesized audio file is too small (${audioSize} bytes) — likely empty`,
+      );
     }
 
     // Per D-20: Two-pass merge approach
@@ -1159,7 +1346,9 @@ export const pipeline = {
       if (!fs.existsSync(bgPath)) {
         const bgStream = await tigris.download(translation.backgroundAudioKey);
         if (!bgStream) {
-          console.warn(`[pipeline] Failed to download background audio — proceeding with speech-only`);
+          console.warn(
+            `[pipeline] Failed to download background audio — proceeding with speech-only`,
+          );
         } else {
           const bws = fs.createWriteStream(bgPath);
           for await (const chunk of bgStream as AsyncIterable<Uint8Array>) {
@@ -1181,18 +1370,24 @@ export const pipeline = {
           await ffmpeg.preMixAudio(speechPath, duckedBgPath, premixPath);
 
           finalAudioPath = premixPath;
-          console.log(`[pipeline] Pre-mix complete — speech + ducked background`);
+          console.log(
+            `[pipeline] Pre-mix complete — speech + ducked background`,
+          );
         } catch (err) {
           // Per D-07: If background mixing fails, fall back to speech-only
           const msg = err instanceof Error ? err.message : "Unknown error";
-          console.warn(`[pipeline] Background pre-mix failed — using speech-only: ${msg}`);
+          console.warn(
+            `[pipeline] Background pre-mix failed — using speech-only: ${msg}`,
+          );
           finalAudioPath = speechPath;
         }
       }
     }
 
     const audioDuration = await ffmpeg.getDuration(finalAudioPath);
-    console.log(`[pipeline] Final audio duration: ${audioDuration.toFixed(1)}s`);
+    console.log(
+      `[pipeline] Final audio duration: ${audioDuration.toFixed(1)}s`,
+    );
 
     // Pass 2: Mux audio onto video (per D-21: -c:v copy, -c:a aac)
     const outputPath = await ffmpeg.mergeAudioVideo(
@@ -1203,7 +1398,10 @@ export const pipeline = {
 
     // Per D-22: Quality check
     const expectedDuration = translation.video.durationSec ?? audioDuration;
-    const qualityCheck = await ffmpeg.verifyMergeOutput(outputPath, expectedDuration);
+    const qualityCheck = await ffmpeg.verifyMergeOutput(
+      outputPath,
+      expectedDuration,
+    );
     if (!qualityCheck.valid) {
       throw new Error(`Merge quality check failed: ${qualityCheck.reason}`);
     }

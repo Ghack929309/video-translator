@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: milestone
-status: unknown
-last_updated: "2026-03-29T18:13:47.663Z"
+status: Executing Phase 12
+last_updated: "2026-03-31T12:07:19.636Z"
 progress:
-  total_phases: 11
-  completed_phases: 1
-  total_plans: 12
-  completed_plans: 3
+  total_phases: 12
+  completed_phases: 2
+  total_plans: 14
+  completed_plans: 5
 ---
 
 # Project State: Dubly
@@ -18,7 +18,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-26)
 
 **Core value:** The translated video must sound natural — each speaker's voice preserved, speaking the target language without accent bleed.
-**Current focus:** Phase 11 — fix-audio-pipeline-preserve-background-sounds-improve-multi-speaker-sync-and-handle-tts-failures-gracefully
+**Current focus:** Phase 12 — improve-transcription-timeline-accuracy
 
 ## Current Milestone
 
@@ -56,6 +56,7 @@ See: .planning/PROJECT.md (updated 2026-03-26)
 - Phase 9 added: Optimize Pod Scheduling and Lifecycle Safety
 - Phase 10 added: Enhance voice cloning synthesis and merge synchronization
 - Phase 11 added: Fix audio pipeline: preserve background sounds, improve multi-speaker sync, and handle TTS failures gracefully
+- Phase 12 added: Improve transcription timeline accuracy — research and fix audio-to-video timing drift causing dubbed speech to end before original video
 
 ---
-*Last updated: 2026-03-29 after phase 11 addition*
+*Last updated: 2026-03-31 after phase 12 addition*
