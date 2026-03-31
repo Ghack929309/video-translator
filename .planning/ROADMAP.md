@@ -149,7 +149,18 @@ Plans:
 - [x] 11-03-PLAN.md — CosyVoice TS client overhaul + pipeline rewrite (SEPARATE_AUDIO, SYNTHESIZE, MERGE)
 - [x] 11-04-PLAN.md — UI changes (background audio toggle, failed segment warning, 8-step progress)
 
+### Phase 12: Improve transcription timeline accuracy — research and fix audio-to-video timing drift causing dubbed speech to end before original video
+
+**Goal:** Fix audio-to-video timing drift by rewriting the gap-aware pacing logic to always enforce per-segment duration matching, removing silence padding from timeStretchExact, splitting long utterances at sentence boundaries, and adding post-synthesis timeline validation logging.
+**Requirements**: DRIFT-01, DRIFT-02, DRIFT-03, DRIFT-04, DRIFT-05, DRIFT-06
+**Depends on:** Phase 11
+**Plans:** 2 plans
+
+Plans:
+- [ ] 12-01-PLAN.md — Fix timeStretchExact silence padding + add splitLongSegments utility
+- [ ] 12-02-PLAN.md — Rewrite gap-aware pacing decision tree + post-synthesis timeline validation
+
 ---
 
 *Roadmap created: 2026-03-26*
-*Last updated: 2026-03-29 after phase 11 planning*
+*Last updated: 2026-03-30 after phase 12 planning*
