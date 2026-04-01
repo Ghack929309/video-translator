@@ -365,9 +365,10 @@ async def synthesize_instruct2(
                 raise e
             raise HTTPException(status_code=400, detail="Invalid audio file")
 
-        # For instruct2, pass plain text only — the model handles prompt formatting internally.
-        # Do NOT add <|endofprompt|> or language tags; the instruct_text already controls language/style.
-        final_text = text
+        # For instruct2: <|endofprompt|> is REQUIRED by CosyVoice 3 (assertion check).
+        # Do NOT add language tags like <|fr|> — those get read aloud in instruct2 mode.
+        # The instruct_text already controls language and style.
+        final_text = f"<|endofprompt|>{text}"
 
         print(f"Synthesizing (instruct2) | Lang: {target_language or 'auto'} | Text: {text[:60]}... | Instruct: {instruct_text[:60]}...")
 
@@ -397,9 +398,10 @@ async def synthesize_instruct2(
 
         except AttributeError:
             # Model doesn't support inference_instruct2 — fall back to cross_lingual
-            # cross_lingual needs <|endofprompt|> prefix
+            # cross_lingual needs <|endofprompt|> + optional language tag
             print(f"[instruct2] Model lacks inference_instruct2 — falling back to cross_lingual")
-            cross_lingual_text = f"<|endofprompt|>{final_text}"
+            lang_tag = f"<|{target_language}|>" if target_language else ""
+            cross_lingual_text = f"<|endofprompt|>{lang_tag}{text}"
             output_gen = MODEL.inference_cross_lingual(
                 cross_lingual_text,
                 temp_wav_path,

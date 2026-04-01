@@ -1272,13 +1272,16 @@ export const pipeline = {
           // Phase 14: Short segments use instruct2 mode for better accent control.
           // Non-neutral emotions also use instruct2 for expressive synthesis.
           // Falls back to carrier phrase padding (Phase 13) if instruct2 fails.
+          // instruct2 requires minimum ~8 chars — shorter text hits PyTorch conv kernel errors.
           const originalText = normalizedText;
           const isShortSegment =
             originalText.length < SHORT_SEGMENT_CHARS && isCosyVoice;
           const segEmotion = seg.emotion ?? "neutral";
           const hasEmotion = segEmotion !== "neutral" && isCosyVoice;
+          const MIN_INSTRUCT2_CHARS = 8;
+          const textLongEnoughForInstruct2 = originalText.length >= MIN_INSTRUCT2_CHARS;
           const useInstruct2 =
-            (isShortSegment || hasEmotion) && env.RUNPOD_POD_ID;
+            (isShortSegment || hasEmotion) && env.RUNPOD_POD_ID && textLongEnoughForInstruct2;
           let usedInstruct2 = false;
 
           if (isCosyVoice && useInstruct2) {
