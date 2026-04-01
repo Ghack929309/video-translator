@@ -51,6 +51,7 @@ export type TranslationMinAggregateOutputType = {
   backgroundAudioKey: string | null
   vocalsAudioKey: string | null
   enableBackgroundMix: boolean | null
+  backgroundVolume: string | null
   loudnessProfile: string | null
   failedSegmentCount: number | null
   resultVideoKey: string | null
@@ -77,6 +78,7 @@ export type TranslationMaxAggregateOutputType = {
   backgroundAudioKey: string | null
   vocalsAudioKey: string | null
   enableBackgroundMix: boolean | null
+  backgroundVolume: string | null
   loudnessProfile: string | null
   failedSegmentCount: number | null
   resultVideoKey: string | null
@@ -105,6 +107,7 @@ export type TranslationCountAggregateOutputType = {
   backgroundAudioKey: number
   vocalsAudioKey: number
   enableBackgroundMix: number
+  backgroundVolume: number
   loudnessProfile: number
   failedSegments: number
   failedSegmentCount: number
@@ -147,6 +150,7 @@ export type TranslationMinAggregateInputType = {
   backgroundAudioKey?: true
   vocalsAudioKey?: true
   enableBackgroundMix?: true
+  backgroundVolume?: true
   loudnessProfile?: true
   failedSegmentCount?: true
   resultVideoKey?: true
@@ -173,6 +177,7 @@ export type TranslationMaxAggregateInputType = {
   backgroundAudioKey?: true
   vocalsAudioKey?: true
   enableBackgroundMix?: true
+  backgroundVolume?: true
   loudnessProfile?: true
   failedSegmentCount?: true
   resultVideoKey?: true
@@ -201,6 +206,7 @@ export type TranslationCountAggregateInputType = {
   backgroundAudioKey?: true
   vocalsAudioKey?: true
   enableBackgroundMix?: true
+  backgroundVolume?: true
   loudnessProfile?: true
   failedSegments?: true
   failedSegmentCount?: true
@@ -318,6 +324,7 @@ export type TranslationGroupByOutputType = {
   backgroundAudioKey: string | null
   vocalsAudioKey: string | null
   enableBackgroundMix: boolean
+  backgroundVolume: string
   loudnessProfile: string
   failedSegments: runtime.JsonValue | null
   failedSegmentCount: number
@@ -371,6 +378,7 @@ export type TranslationWhereInput = {
   backgroundAudioKey?: Prisma.StringNullableFilter<"Translation"> | string | null
   vocalsAudioKey?: Prisma.StringNullableFilter<"Translation"> | string | null
   enableBackgroundMix?: Prisma.BoolFilter<"Translation"> | boolean
+  backgroundVolume?: Prisma.StringFilter<"Translation"> | string
   loudnessProfile?: Prisma.StringFilter<"Translation"> | string
   failedSegments?: Prisma.JsonNullableFilter<"Translation">
   failedSegmentCount?: Prisma.IntFilter<"Translation"> | number
@@ -402,6 +410,7 @@ export type TranslationOrderByWithRelationInput = {
   backgroundAudioKey?: Prisma.SortOrderInput | Prisma.SortOrder
   vocalsAudioKey?: Prisma.SortOrderInput | Prisma.SortOrder
   enableBackgroundMix?: Prisma.SortOrder
+  backgroundVolume?: Prisma.SortOrder
   loudnessProfile?: Prisma.SortOrder
   failedSegments?: Prisma.SortOrderInput | Prisma.SortOrder
   failedSegmentCount?: Prisma.SortOrder
@@ -436,6 +445,7 @@ export type TranslationWhereUniqueInput = Prisma.AtLeast<{
   backgroundAudioKey?: Prisma.StringNullableFilter<"Translation"> | string | null
   vocalsAudioKey?: Prisma.StringNullableFilter<"Translation"> | string | null
   enableBackgroundMix?: Prisma.BoolFilter<"Translation"> | boolean
+  backgroundVolume?: Prisma.StringFilter<"Translation"> | string
   loudnessProfile?: Prisma.StringFilter<"Translation"> | string
   failedSegments?: Prisma.JsonNullableFilter<"Translation">
   failedSegmentCount?: Prisma.IntFilter<"Translation"> | number
@@ -467,6 +477,7 @@ export type TranslationOrderByWithAggregationInput = {
   backgroundAudioKey?: Prisma.SortOrderInput | Prisma.SortOrder
   vocalsAudioKey?: Prisma.SortOrderInput | Prisma.SortOrder
   enableBackgroundMix?: Prisma.SortOrder
+  backgroundVolume?: Prisma.SortOrder
   loudnessProfile?: Prisma.SortOrder
   failedSegments?: Prisma.SortOrderInput | Prisma.SortOrder
   failedSegmentCount?: Prisma.SortOrder
@@ -505,6 +516,7 @@ export type TranslationScalarWhereWithAggregatesInput = {
   backgroundAudioKey?: Prisma.StringNullableWithAggregatesFilter<"Translation"> | string | null
   vocalsAudioKey?: Prisma.StringNullableWithAggregatesFilter<"Translation"> | string | null
   enableBackgroundMix?: Prisma.BoolWithAggregatesFilter<"Translation"> | boolean
+  backgroundVolume?: Prisma.StringWithAggregatesFilter<"Translation"> | string
   loudnessProfile?: Prisma.StringWithAggregatesFilter<"Translation"> | string
   failedSegments?: Prisma.JsonNullableWithAggregatesFilter<"Translation">
   failedSegmentCount?: Prisma.IntWithAggregatesFilter<"Translation"> | number
@@ -534,6 +546,7 @@ export type TranslationCreateInput = {
   backgroundAudioKey?: string | null
   vocalsAudioKey?: string | null
   enableBackgroundMix?: boolean
+  backgroundVolume?: string
   loudnessProfile?: string
   failedSegments?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   failedSegmentCount?: number
@@ -565,6 +578,7 @@ export type TranslationUncheckedCreateInput = {
   backgroundAudioKey?: string | null
   vocalsAudioKey?: string | null
   enableBackgroundMix?: boolean
+  backgroundVolume?: string
   loudnessProfile?: string
   failedSegments?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   failedSegmentCount?: number
@@ -594,6 +608,7 @@ export type TranslationUpdateInput = {
   backgroundAudioKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   vocalsAudioKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   enableBackgroundMix?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  backgroundVolume?: Prisma.StringFieldUpdateOperationsInput | string
   loudnessProfile?: Prisma.StringFieldUpdateOperationsInput | string
   failedSegments?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   failedSegmentCount?: Prisma.IntFieldUpdateOperationsInput | number
@@ -625,6 +640,7 @@ export type TranslationUncheckedUpdateInput = {
   backgroundAudioKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   vocalsAudioKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   enableBackgroundMix?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  backgroundVolume?: Prisma.StringFieldUpdateOperationsInput | string
   loudnessProfile?: Prisma.StringFieldUpdateOperationsInput | string
   failedSegments?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   failedSegmentCount?: Prisma.IntFieldUpdateOperationsInput | number
@@ -655,6 +671,7 @@ export type TranslationCreateManyInput = {
   backgroundAudioKey?: string | null
   vocalsAudioKey?: string | null
   enableBackgroundMix?: boolean
+  backgroundVolume?: string
   loudnessProfile?: string
   failedSegments?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   failedSegmentCount?: number
@@ -684,6 +701,7 @@ export type TranslationUpdateManyMutationInput = {
   backgroundAudioKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   vocalsAudioKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   enableBackgroundMix?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  backgroundVolume?: Prisma.StringFieldUpdateOperationsInput | string
   loudnessProfile?: Prisma.StringFieldUpdateOperationsInput | string
   failedSegments?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   failedSegmentCount?: Prisma.IntFieldUpdateOperationsInput | number
@@ -714,6 +732,7 @@ export type TranslationUncheckedUpdateManyInput = {
   backgroundAudioKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   vocalsAudioKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   enableBackgroundMix?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  backgroundVolume?: Prisma.StringFieldUpdateOperationsInput | string
   loudnessProfile?: Prisma.StringFieldUpdateOperationsInput | string
   failedSegments?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   failedSegmentCount?: Prisma.IntFieldUpdateOperationsInput | number
@@ -754,6 +773,7 @@ export type TranslationCountOrderByAggregateInput = {
   backgroundAudioKey?: Prisma.SortOrder
   vocalsAudioKey?: Prisma.SortOrder
   enableBackgroundMix?: Prisma.SortOrder
+  backgroundVolume?: Prisma.SortOrder
   loudnessProfile?: Prisma.SortOrder
   failedSegments?: Prisma.SortOrder
   failedSegmentCount?: Prisma.SortOrder
@@ -788,6 +808,7 @@ export type TranslationMaxOrderByAggregateInput = {
   backgroundAudioKey?: Prisma.SortOrder
   vocalsAudioKey?: Prisma.SortOrder
   enableBackgroundMix?: Prisma.SortOrder
+  backgroundVolume?: Prisma.SortOrder
   loudnessProfile?: Prisma.SortOrder
   failedSegmentCount?: Prisma.SortOrder
   resultVideoKey?: Prisma.SortOrder
@@ -814,6 +835,7 @@ export type TranslationMinOrderByAggregateInput = {
   backgroundAudioKey?: Prisma.SortOrder
   vocalsAudioKey?: Prisma.SortOrder
   enableBackgroundMix?: Prisma.SortOrder
+  backgroundVolume?: Prisma.SortOrder
   loudnessProfile?: Prisma.SortOrder
   failedSegmentCount?: Prisma.SortOrder
   resultVideoKey?: Prisma.SortOrder
@@ -917,6 +939,7 @@ export type TranslationCreateWithoutVideoInput = {
   backgroundAudioKey?: string | null
   vocalsAudioKey?: string | null
   enableBackgroundMix?: boolean
+  backgroundVolume?: string
   loudnessProfile?: string
   failedSegments?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   failedSegmentCount?: number
@@ -946,6 +969,7 @@ export type TranslationUncheckedCreateWithoutVideoInput = {
   backgroundAudioKey?: string | null
   vocalsAudioKey?: string | null
   enableBackgroundMix?: boolean
+  backgroundVolume?: string
   loudnessProfile?: string
   failedSegments?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   failedSegmentCount?: number
@@ -1005,6 +1029,7 @@ export type TranslationScalarWhereInput = {
   backgroundAudioKey?: Prisma.StringNullableFilter<"Translation"> | string | null
   vocalsAudioKey?: Prisma.StringNullableFilter<"Translation"> | string | null
   enableBackgroundMix?: Prisma.BoolFilter<"Translation"> | boolean
+  backgroundVolume?: Prisma.StringFilter<"Translation"> | string
   loudnessProfile?: Prisma.StringFilter<"Translation"> | string
   failedSegments?: Prisma.JsonNullableFilter<"Translation">
   failedSegmentCount?: Prisma.IntFilter<"Translation"> | number
@@ -1034,6 +1059,7 @@ export type TranslationCreateManyVideoInput = {
   backgroundAudioKey?: string | null
   vocalsAudioKey?: string | null
   enableBackgroundMix?: boolean
+  backgroundVolume?: string
   loudnessProfile?: string
   failedSegments?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   failedSegmentCount?: number
@@ -1063,6 +1089,7 @@ export type TranslationUpdateWithoutVideoInput = {
   backgroundAudioKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   vocalsAudioKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   enableBackgroundMix?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  backgroundVolume?: Prisma.StringFieldUpdateOperationsInput | string
   loudnessProfile?: Prisma.StringFieldUpdateOperationsInput | string
   failedSegments?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   failedSegmentCount?: Prisma.IntFieldUpdateOperationsInput | number
@@ -1092,6 +1119,7 @@ export type TranslationUncheckedUpdateWithoutVideoInput = {
   backgroundAudioKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   vocalsAudioKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   enableBackgroundMix?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  backgroundVolume?: Prisma.StringFieldUpdateOperationsInput | string
   loudnessProfile?: Prisma.StringFieldUpdateOperationsInput | string
   failedSegments?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   failedSegmentCount?: Prisma.IntFieldUpdateOperationsInput | number
@@ -1121,6 +1149,7 @@ export type TranslationUncheckedUpdateManyWithoutVideoInput = {
   backgroundAudioKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   vocalsAudioKey?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   enableBackgroundMix?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  backgroundVolume?: Prisma.StringFieldUpdateOperationsInput | string
   loudnessProfile?: Prisma.StringFieldUpdateOperationsInput | string
   failedSegments?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   failedSegmentCount?: Prisma.IntFieldUpdateOperationsInput | number
@@ -1153,6 +1182,7 @@ export type TranslationSelect<ExtArgs extends runtime.Types.Extensions.InternalA
   backgroundAudioKey?: boolean
   vocalsAudioKey?: boolean
   enableBackgroundMix?: boolean
+  backgroundVolume?: boolean
   loudnessProfile?: boolean
   failedSegments?: boolean
   failedSegmentCount?: boolean
@@ -1184,6 +1214,7 @@ export type TranslationSelectCreateManyAndReturn<ExtArgs extends runtime.Types.E
   backgroundAudioKey?: boolean
   vocalsAudioKey?: boolean
   enableBackgroundMix?: boolean
+  backgroundVolume?: boolean
   loudnessProfile?: boolean
   failedSegments?: boolean
   failedSegmentCount?: boolean
@@ -1215,6 +1246,7 @@ export type TranslationSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.E
   backgroundAudioKey?: boolean
   vocalsAudioKey?: boolean
   enableBackgroundMix?: boolean
+  backgroundVolume?: boolean
   loudnessProfile?: boolean
   failedSegments?: boolean
   failedSegmentCount?: boolean
@@ -1246,6 +1278,7 @@ export type TranslationSelectScalar = {
   backgroundAudioKey?: boolean
   vocalsAudioKey?: boolean
   enableBackgroundMix?: boolean
+  backgroundVolume?: boolean
   loudnessProfile?: boolean
   failedSegments?: boolean
   failedSegmentCount?: boolean
@@ -1261,7 +1294,7 @@ export type TranslationSelectScalar = {
   updatedAt?: boolean
 }
 
-export type TranslationOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "videoId" | "targetLanguage" | "ttsEngine" | "status" | "currentStep" | "progress" | "extractedAudioKey" | "transcriptJson" | "translatedJson" | "synthesizedAudioKey" | "backgroundAudioKey" | "vocalsAudioKey" | "enableBackgroundMix" | "loudnessProfile" | "failedSegments" | "failedSegmentCount" | "resultVideoKey" | "fishAudioVoiceId" | "fishAudioVoiceMap" | "errorMessage" | "errorStep" | "retryCount" | "startedAt" | "completedAt" | "createdAt" | "updatedAt", ExtArgs["result"]["translation"]>
+export type TranslationOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "videoId" | "targetLanguage" | "ttsEngine" | "status" | "currentStep" | "progress" | "extractedAudioKey" | "transcriptJson" | "translatedJson" | "synthesizedAudioKey" | "backgroundAudioKey" | "vocalsAudioKey" | "enableBackgroundMix" | "backgroundVolume" | "loudnessProfile" | "failedSegments" | "failedSegmentCount" | "resultVideoKey" | "fishAudioVoiceId" | "fishAudioVoiceMap" | "errorMessage" | "errorStep" | "retryCount" | "startedAt" | "completedAt" | "createdAt" | "updatedAt", ExtArgs["result"]["translation"]>
 export type TranslationInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   video?: boolean | Prisma.VideoDefaultArgs<ExtArgs>
 }
@@ -1292,6 +1325,7 @@ export type $TranslationPayload<ExtArgs extends runtime.Types.Extensions.Interna
     backgroundAudioKey: string | null
     vocalsAudioKey: string | null
     enableBackgroundMix: boolean
+    backgroundVolume: string
     loudnessProfile: string
     failedSegments: runtime.JsonValue | null
     failedSegmentCount: number
@@ -1743,6 +1777,7 @@ export interface TranslationFieldRefs {
   readonly backgroundAudioKey: Prisma.FieldRef<"Translation", 'String'>
   readonly vocalsAudioKey: Prisma.FieldRef<"Translation", 'String'>
   readonly enableBackgroundMix: Prisma.FieldRef<"Translation", 'Boolean'>
+  readonly backgroundVolume: Prisma.FieldRef<"Translation", 'String'>
   readonly loudnessProfile: Prisma.FieldRef<"Translation", 'String'>
   readonly failedSegments: Prisma.FieldRef<"Translation", 'Json'>
   readonly failedSegmentCount: Prisma.FieldRef<"Translation", 'Int'>

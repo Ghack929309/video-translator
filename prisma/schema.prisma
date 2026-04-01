@@ -49,6 +49,7 @@ model Translation {
   backgroundAudioKey  String?
   vocalsAudioKey      String?
   enableBackgroundMix Boolean           @default(true)
+  backgroundVolume    String            @default("MEDIUM")
   loudnessProfile     String            @default("WEB")
   failedSegments      Json?
   failedSegmentCount  Int               @default(0)

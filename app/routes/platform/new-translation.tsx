@@ -52,7 +52,7 @@ export async function action({ request }: Route.ActionArgs) {
     return { error: firstError };
   }
 
-  const { sourceType, sourceUrl, storageKey, title, targetLanguage, ttsEngine, enableBackgroundMix } =
+  const { sourceType, sourceUrl, storageKey, title, targetLanguage, ttsEngine, enableBackgroundMix, backgroundVolume } =
     parsed.data;
 
   // Rate limit: max 5 concurrent (PENDING or PROCESSING) jobs per user
@@ -86,6 +86,7 @@ export async function action({ request }: Route.ActionArgs) {
       targetLanguage,
       ttsEngine,
       enableBackgroundMix,
+      backgroundVolume,
     },
   });
 
@@ -107,6 +108,7 @@ export default function NewTranslationPage() {
   const [title, setTitle] = useState("");
   const [engine, setEngine] = useState<"FISH_AUDIO" | "COSYVOICE" | null>(null);
   const [enableBackgroundMix, setEnableBackgroundMix] = useState(true);
+  const [backgroundVolume, setBackgroundVolume] = useState<"LOW" | "MEDIUM" | "HIGH">("MEDIUM");
 
   const upload = useUpload();
 
@@ -236,6 +238,44 @@ export default function NewTranslationPage() {
               />
             </div>
 
+            {/* Background Volume Level (Phase 14) */}
+            {enableBackgroundMix && (
+              <div className="space-y-2 pl-1">
+                <Label>Background Volume</Label>
+                <Select
+                  value={backgroundVolume}
+                  onValueChange={(val) => setBackgroundVolume(val as "LOW" | "MEDIUM" | "HIGH")}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select volume level..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="LOW">
+                      <div className="flex flex-col">
+                        <span>Low</span>
+                        <span className="text-xs text-muted-foreground mt-0.5">Subtle background. Good for podcasts and educational content.</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="MEDIUM">
+                      <div className="flex flex-col">
+                        <span>Medium</span>
+                        <span className="text-xs text-muted-foreground mt-0.5">Balanced mix. Netflix and streaming platforms typically use this level.</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="HIGH">
+                      <div className="flex flex-col">
+                        <span>High</span>
+                        <span className="text-xs text-muted-foreground mt-0.5">Prominent background. YouTube creators often prefer this for music-heavy content.</span>
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Controls how loud background audio is relative to speech. Industry standards: Netflix uses -14 LUFS for speech with balanced background, YouTube recommends -14 LUFS overall.
+                </p>
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="title">Video Title</Label>
               <Input
@@ -269,6 +309,11 @@ export default function NewTranslationPage() {
               type="hidden"
               name="enableBackgroundMix"
               value={enableBackgroundMix ? "true" : "false"}
+            />
+            <input
+              type="hidden"
+              name="backgroundVolume"
+              value={backgroundVolume}
             />
             {tab === "upload" ? (
               <>

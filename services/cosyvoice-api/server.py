@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 import tempfile
 import traceback
 import io
@@ -150,6 +151,10 @@ print("[Starting up] Server is READY to accept requests.")
 
 # ── Routes ────────────────────────────────────────────────────────────────
 
+def strip_control_tags(text: str) -> str:
+    """Remove all <|...|> control tokens from text so they are never read aloud."""
+    return re.sub(r"<\|[^|]*\|>", "", text).strip()
+
 @app.get("/health")
 def health_check():
     return {
@@ -240,7 +245,7 @@ async def synthesize(
     reference_text: str = Form(""),
     reference_audio: UploadFile = File(...)
 ):
-    text = text.strip()
+    text = strip_control_tags(text.strip())
     if not text:
         raise HTTPException(status_code=400, detail="Text cannot be empty")
 
@@ -316,6 +321,115 @@ async def synthesize(
     finally:
         if os.path.exists(temp_wav_path):
             os.remove(temp_wav_path)
+
+@app.post("/synthesize_instruct2")
+async def synthesize_instruct2(
+    text: str = Form(...),
+    instruct_text: str = Form(...),
+    speed: float = Form(1.0),
+    target_language: str = Form(""),
+    reference_audio: UploadFile = File(...)
+):
+    """Synthesize speech using CosyVoice 3 instruct2 mode.
+
+    instruct_text controls voice style, emotion, and accent.
+    Example: "Speak with a warm, enthusiastic French tone."
+
+    This mode is ideal for:
+    - Short segments where cross_lingual produces accent bleeding
+    - Emotion-aware synthesis (happy, sad, angry, etc.)
+    """
+    text = strip_control_tags(text.strip())
+    if not text:
+        raise HTTPException(status_code=400, detail="Text cannot be empty")
+    instruct_text = strip_control_tags(instruct_text.strip())
+    if not instruct_text:
+        raise HTTPException(status_code=400, detail="instruct_text cannot be empty")
+
+    speed = max(0.5, min(2.0, speed))
+
+    fd, temp_wav_path = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
+
+    try:
+        with open(temp_wav_path, "wb") as f:
+            f.write(await reference_audio.read())
+
+        try:
+            waveform, sample_rate = torchaudio.load(temp_wav_path)
+            duration = waveform.shape[1] / sample_rate
+            if duration < 1.0:
+                raise HTTPException(status_code=400, detail="Reference audio too short (< 1s)")
+        except Exception as e:
+            if isinstance(e, HTTPException):
+                raise e
+            raise HTTPException(status_code=400, detail="Invalid audio file")
+
+        # For instruct2, pass plain text only — the model handles prompt formatting internally.
+        # Do NOT add <|endofprompt|> or language tags; the instruct_text already controls language/style.
+        final_text = text
+
+        print(f"Synthesizing (instruct2) | Lang: {target_language or 'auto'} | Text: {text[:60]}... | Instruct: {instruct_text[:60]}...")
+
+        try:
+            output_gen = MODEL.inference_instruct2(
+                final_text,
+                instruct_text,
+                temp_wav_path,
+                stream=False,
+                speed=speed,
+            )
+
+            all_chunks = []
+            for chunk in output_gen:
+                all_chunks.append(chunk["tts_speech"])
+
+            if not all_chunks:
+                raise HTTPException(status_code=500, detail="Model returned no audio")
+
+            speech_tensor = torch.cat(all_chunks, dim=1)
+
+            wav_io = io.BytesIO()
+            torchaudio.save(wav_io, speech_tensor, MODEL.sample_rate, format="wav")
+            wav_io.seek(0)
+
+            return StreamingResponse(wav_io, media_type="audio/wav")
+
+        except AttributeError:
+            # Model doesn't support inference_instruct2 — fall back to cross_lingual
+            # cross_lingual needs <|endofprompt|> prefix
+            print(f"[instruct2] Model lacks inference_instruct2 — falling back to cross_lingual")
+            cross_lingual_text = f"<|endofprompt|>{final_text}"
+            output_gen = MODEL.inference_cross_lingual(
+                cross_lingual_text,
+                temp_wav_path,
+                stream=False,
+                speed=speed,
+            )
+
+            all_chunks = []
+            for chunk in output_gen:
+                all_chunks.append(chunk["tts_speech"])
+
+            if not all_chunks:
+                raise HTTPException(status_code=500, detail="Model returned no audio")
+
+            speech_tensor = torch.cat(all_chunks, dim=1)
+
+            wav_io = io.BytesIO()
+            torchaudio.save(wav_io, speech_tensor, MODEL.sample_rate, format="wav")
+            wav_io.seek(0)
+
+            return StreamingResponse(wav_io, media_type="audio/wav")
+
+        except Exception as e:
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=str(e))
+
+    finally:
+        if os.path.exists(temp_wav_path):
+            os.remove(temp_wav_path)
+
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):

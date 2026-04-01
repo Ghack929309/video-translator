@@ -943,21 +943,29 @@ export const ffmpeg = {
     speechPath: string,
     backgroundPath: string,
     outputPath: string,
-    speechToBackgroundDb: number = 10,
+    backgroundVolume: "LOW" | "MEDIUM" | "HIGH" = "MEDIUM",
   ): Promise<string> {
     const ffmpegBin = ffmpegPath ?? "ffmpeg";
 
+    // Phase 14: Volume-aware sidechain ducking parameters
+    // Each level adjusts: pre-volume, compression ratio, and threshold
+    const volumeProfiles = {
+      LOW: { preVolDb: -12, ratio: 10, threshold: 0.01 },
+      MEDIUM: { preVolDb: -6, ratio: 6, threshold: 0.015 },
+      HIGH: { preVolDb: -2, ratio: 3, threshold: 0.025 },
+    };
+    const profile = volumeProfiles[backgroundVolume];
+
     return new Promise((resolve, reject) => {
       // sidechaincompress: background is ducked when speech level exceeds threshold
-      // threshold=0.015 — triggers on any audible speech
-      // ratio=6 — strong compression (effective ducking)
+      // Pre-volume sets the base background level
+      // ratio controls how aggressively background ducks during speech
       // attack=200ms — fades background down quickly when speech starts
       // release=1000ms — background fades back up slowly after speech ends (natural)
-      // makeup=1 — no makeup gain on the compressed signal
       const filter =
-        `[1:a]aformat=sample_rates=44100:channel_layouts=stereo[bg];` +
+        `[1:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=${profile.preVolDb}dB[bg];` +
         `[0:a]aformat=sample_rates=44100:channel_layouts=stereo[speech];` +
-        `[bg][speech]sidechaincompress=threshold=0.015:ratio=6:attack=200:release=1000:level_sc=1[ducked];` +
+        `[bg][speech]sidechaincompress=threshold=${profile.threshold}:ratio=${profile.ratio}:attack=200:release=1000:level_sc=1[ducked];` +
         `[speech][ducked]amix=inputs=2:duration=longest:normalize=0[out]`;
 
       const args = [
@@ -980,7 +988,7 @@ export const ffmpeg = {
       ];
 
       console.log(
-        `[ffmpeg] Sidechain ducking: speech controls background compression (target: ${speechToBackgroundDb}dB speech-to-bg ratio)`,
+        `[ffmpeg] Sidechain ducking: ${backgroundVolume} profile (preVol: ${profile.preVolDb}dB, ratio: ${profile.ratio}, threshold: ${profile.threshold})`,
       );
 
       const proc = spawn(ffmpegBin, args);

@@ -11,6 +11,7 @@ import { fishAudio } from "~/services/fish-audio.server";
 import { cosyvoice } from "~/services/cosyvoice.server";
 import { env } from "~/utils/env.server";
 import { runpodApi } from "~/services/runpod-api.server";
+import { normalizeForTTS } from "~/services/tts-normalizer.server";
 
 // ── Delayed Pod Shutdown ──────────────────────────────────────────────────
 // Instead of stopping the pod immediately after a job completes, wait 20 minutes.
@@ -177,11 +178,39 @@ function getCarrierPhrase(langCode: string): string {
   return CARRIER_PHRASES[langCode] ?? CARRIER_PHRASES.en;
 }
 
+/**
+ * Phase 14: Language-specific instruct2 prompts for accent control.
+ * These instructions tell CosyVoice to use the correct target language
+ * phonology, reducing accent bleeding on short segments.
+ */
+const LANGUAGE_INSTRUCT: Record<string, string> = {
+  en: "Speak naturally in English with clear pronunciation.",
+  fr: "Parlez naturellement en français avec une prononciation claire.",
+  es: "Habla de forma natural en español con una pronunciación clara.",
+  de: "Sprechen Sie natürlich auf Deutsch mit klarer Aussprache.",
+  it: "Parla in modo naturale in italiano con una pronuncia chiara.",
+  pt: "Fale naturalmente em português com uma pronúncia clara.",
+  ja: "自然な日本語で、はっきりとした発音で話してください。",
+  ko: "자연스러운 한국어로 명확하게 발음하며 말해 주세요.",
+  zh: "用自然的中文清晰地朗读。",
+  ru: "Говорите естественно по-русски с чётким произношением.",
+};
+
+function getLanguageInstruct(langCode: string, emotion?: string): string {
+  const base =
+    LANGUAGE_INSTRUCT[langCode] ?? "Speak naturally with clear pronunciation.";
+  if (emotion && emotion !== "neutral") {
+    return `${base} Use a ${emotion} tone.`;
+  }
+  return base;
+}
+
 interface TranslatedSegment {
   translatedText: string;
   start: number;
   end: number;
   speaker?: string;
+  emotion?: string; // Phase 14: detected emotion
 }
 
 function splitLongSegments(segments: TranslatedSegment[]): TranslatedSegment[] {
@@ -1234,61 +1263,112 @@ export const pipeline = {
           // Per D-19: No prosodySpeed, no avgCharsPerSec
           let audioBuffer: Buffer;
 
-          // Phase 13: Pad short segments with carrier phrase to reduce accent bleeding
-          const originalText = seg.translatedText;
+          // Phase 14: Normalize text for TTS (acronyms, numbers, currency, symbols)
+          const normalizedText = normalizeForTTS(
+            seg.translatedText,
+            translation.targetLanguage,
+          );
+
+          // Phase 14: Short segments use instruct2 mode for better accent control.
+          // Non-neutral emotions also use instruct2 for expressive synthesis.
+          // Falls back to carrier phrase padding (Phase 13) if instruct2 fails.
+          const originalText = normalizedText;
           const isShortSegment =
             originalText.length < SHORT_SEGMENT_CHARS && isCosyVoice;
-          const carrierPhrase = isShortSegment
-            ? getCarrierPhrase(translation.targetLanguage)
-            : "";
-          const ttsText = isShortSegment
-            ? originalText + carrierPhrase
-            : originalText;
+          const segEmotion = seg.emotion ?? "neutral";
+          const hasEmotion = segEmotion !== "neutral" && isCosyVoice;
+          const useInstruct2 =
+            (isShortSegment || hasEmotion) && env.RUNPOD_POD_ID;
+          let usedInstruct2 = false;
 
-          if (isShortSegment) {
-            console.log(
-              `[pipeline] Seg ${i}: short text (${originalText.length} chars) — padded with carrier phrase for better voice quality`,
-            );
+          if (isCosyVoice && useInstruct2) {
+            // Phase 14: Try instruct2 for short segments or emotional segments
+            try {
+              const instructText = getLanguageInstruct(
+                translation.targetLanguage,
+                segEmotion,
+              );
+              audioBuffer = await cosyvoice.synthesizeInstruct2(
+                originalText,
+                instructText,
+                speakerRef,
+                translation.targetLanguage,
+                1.0,
+              );
+              usedInstruct2 = true;
+              console.log(
+                `[pipeline] Seg ${i}: used instruct2 mode (${isShortSegment ? "short text" : "emotion"}: ${segEmotion}, ${originalText.length} chars)`,
+              );
+            } catch (instruct2Err) {
+              const msg =
+                instruct2Err instanceof Error
+                  ? instruct2Err.message
+                  : "Unknown";
+              console.warn(
+                `[pipeline] Seg ${i}: instruct2 failed (${msg}) — falling back to carrier phrase`,
+              );
+              usedInstruct2 = false;
+            }
           }
 
-          if (isCosyVoice) {
-            audioBuffer = await cosyvoice.synthesize(
-              ttsText,
-              speakerRef,
-              sourceLanguage,
-              translation.targetLanguage,
-              1.0, // Per D-15: always 1.0
-            );
-          } else {
-            audioBuffer = await fishAudio.synthesize(
-              seg.translatedText,
-              speakerRef,
-              translation.targetLanguage,
-              1.0, // Per D-15: always 1.0
-            );
+          if (!usedInstruct2) {
+            // Standard synthesis path (with carrier phrase padding for short CosyVoice segments)
+            const carrierPhrase = isShortSegment
+              ? getCarrierPhrase(translation.targetLanguage)
+              : "";
+            const ttsText = isShortSegment
+              ? originalText + carrierPhrase
+              : originalText;
+
+            if (isShortSegment) {
+              console.log(
+                `[pipeline] Seg ${i}: short text (${originalText.length} chars) — padded with carrier phrase for better voice quality`,
+              );
+            }
+
+            if (isCosyVoice) {
+              audioBuffer = await cosyvoice.synthesize(
+                ttsText,
+                speakerRef,
+                sourceLanguage,
+                translation.targetLanguage,
+                1.0, // Per D-15: always 1.0
+              );
+            } else {
+              audioBuffer = await fishAudio.synthesize(
+                normalizedText,
+                speakerRef,
+                translation.targetLanguage,
+                1.0, // Per D-15: always 1.0
+              );
+            }
           }
-          fs.writeFileSync(rawPath, audioBuffer);
+          fs.writeFileSync(rawPath, audioBuffer!);
           let actualGeneratedSec = await ffmpeg.getDuration(rawPath);
 
-          // Phase 13: Trim carrier phrase audio from the end if we padded
-          if (isShortSegment && carrierPhrase.length > 0) {
-            const originalRatio = originalText.length / ttsText.length;
-            const estimatedOriginalDuration =
-              actualGeneratedSec * originalRatio;
-            // Only trim if the estimated duration is reasonable (> 0.3s)
-            if (estimatedOriginalDuration > 0.3) {
-              const trimmedPath = path.join(tmpDir, `tts-trimmed-${i}.wav`);
-              await ffmpeg.extractTimeRange(
-                rawPath,
-                0,
-                estimatedOriginalDuration,
-                trimmedPath,
-              );
-              fs.copyFileSync(trimmedPath, rawPath);
-              actualGeneratedSec = await ffmpeg.getDuration(rawPath);
-              console.log(
-                `[pipeline] Seg ${i}: trimmed carrier phrase — kept ${estimatedOriginalDuration.toFixed(2)}s of ${(estimatedOriginalDuration / originalRatio).toFixed(2)}s`,
-              );
+          // Phase 13: Trim carrier phrase audio from the end if we used carrier phrase padding
+          if (isShortSegment && !usedInstruct2) {
+            const carrierPhrase = getCarrierPhrase(translation.targetLanguage);
+            if (carrierPhrase.length > 0) {
+              const ttsText = originalText + carrierPhrase;
+              const originalRatio = originalText.length / ttsText.length;
+              const estimatedOriginalDuration =
+                actualGeneratedSec * originalRatio;
+              // Only trim if the estimated duration is reasonable (> 0.3s)
+              if (estimatedOriginalDuration > 0.3) {
+                const trimmedPath = path.join(tmpDir, `tts-trimmed-${i}.wav`);
+                await ffmpeg.extractTimeRange(
+                  rawPath,
+                  0,
+                  estimatedOriginalDuration,
+                  trimmedPath,
+                );
+                fs.copyFileSync(trimmedPath, rawPath);
+                actualGeneratedSec = await ffmpeg.getDuration(rawPath);
+                console.log(
+                  `[pipeline] Seg ${i}: trimmed carrier phrase — kept ${estimatedOriginalDuration.toFixed(2)}s of ${(estimatedOriginalDuration / originalRatio).toFixed(2)}s`,
+                );
+              }
             }
           }
 
@@ -1558,10 +1638,19 @@ export const pipeline = {
           // Phase 13: Use dynamic sidechain ducking instead of flat -8dB
           // Background is compressed only when speech is present — much more natural
           const premixPath = path.join(tmpDir, "premixed-audio.wav");
+          const bgVolume = (translation.backgroundVolume ?? "MEDIUM") as
+            | "LOW"
+            | "MEDIUM"
+            | "HIGH";
           try {
-            await ffmpeg.sidechainDuck(speechPath, bgPath, premixPath);
+            await ffmpeg.sidechainDuck(
+              speechPath,
+              bgPath,
+              premixPath,
+              bgVolume,
+            );
             console.log(
-              `[pipeline] Dynamic sidechain duck complete — background ducks during speech`,
+              `[pipeline] Dynamic sidechain duck complete — ${bgVolume} profile`,
             );
           } catch (sidechainErr) {
             // Fall back to legacy flat ducking if sidechain fails

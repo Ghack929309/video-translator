@@ -79,6 +79,7 @@ export interface TranslatedSegment {
   start: number; // ms
   end: number; // ms
   speaker?: string;
+  emotion?: string; // Phase 14: detected emotion (neutral, happy, sad, angry, excited, calm)
 }
 
 const TranslatedSegmentSchema = z.object({
@@ -86,6 +87,7 @@ const TranslatedSegmentSchema = z.object({
     z.object({
       index: z.number(),
       translatedText: z.string(),
+      emotion: z.enum(["neutral", "happy", "sad", "angry", "excited", "calm"]).optional().default("neutral"),
     }),
   ),
 });
@@ -296,7 +298,24 @@ LENGTH MATCHING (CRITICAL FOR DUBBING):
 - Use shorter or longer synonyms, rephrase idioms, or adjust sentence structure to match the target length.
 - If a direct translation is too short, expand with natural filler words or more descriptive phrasing.
 - If a direct translation is too long, use concise synonyms or restructure the sentence.
-- Do NOT sacrifice meaning — find natural phrasing in ${targetLangName} that fits the duration.`,
+- Do NOT sacrifice meaning — find natural phrasing in ${targetLangName} that fits the duration.
+
+PRONUNCIATION & TEXT-TO-SPEECH FORMATTING:
+- Acronyms and abbreviations that are spoken letter-by-letter MUST have periods between each letter: NSA → N.S.A., CIA → C.I.A., FBI → F.B.I., HTML → H.T.M.L., CEO → C.E.O., API → A.P.I.
+- Acronyms that are spoken as words should be left as-is: NASA, NATO, UNICEF, FIFA.
+- Numbers should be written as words when short: 42 → forty-two, 3 → three. Large numbers can stay as digits.
+- Currency should be written out: $50 → fifty dollars, €100 → one hundred euros, £20 → twenty pounds.
+- Percentages should be written out: 15% → fifteen percent, 3.5% → three point five percent.
+- Ordinals should be written out: 1st → first, 2nd → second, 3rd → third.
+- Common abbreviations should be expanded: Dr. → Doctor, Mr. → Mister, Mrs. → Missus, vs. → versus, etc. → et cetera.
+- Do NOT include URLs, email addresses, or hashtags in the translation — omit or describe them naturally.
+
+EMOTION DETECTION:
+- For each segment, also detect the speaker's emotional tone from the original text content and context.
+- Return one of: "neutral", "happy", "sad", "angry", "excited", "calm".
+- Base this on the content and phrasing — exclamations suggest "excited", questions about problems suggest "sad" or "angry", etc.
+- Default to "neutral" if the tone is ambiguous or conversational.
+- This will be used to control voice synthesis expressiveness.`,
         },
         {
           role: "user",
@@ -337,6 +356,7 @@ LENGTH MATCHING (CRITICAL FOR DUBBING):
         start: original.start,
         end: original.end,
         speaker: original.speaker,
+        emotion: match?.emotion ?? "neutral",
       };
     });
 

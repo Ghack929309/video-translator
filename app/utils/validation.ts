@@ -44,6 +44,10 @@ export const videoSubmitSchema = z.object({
     .string()
     .optional()
     .transform((val) => val !== "false"),
+  backgroundVolume: z
+    .enum(["LOW", "MEDIUM", "HIGH"])
+    .optional()
+    .default("MEDIUM"),
 });
 
 export const updateProfileSchema = z.object({

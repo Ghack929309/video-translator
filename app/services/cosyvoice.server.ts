@@ -100,20 +100,26 @@ export const cosyvoice = {
 
     while (Date.now() - start < timeoutMs) {
       try {
-        const res = await fetch(healthUrl, { signal: AbortSignal.timeout(5000) });
+        const res = await fetch(healthUrl, {
+          signal: AbortSignal.timeout(5000),
+        });
         if (res.ok) {
           const data = await res.json();
           if (data.ready === true) {
-            console.log(`[cosyvoice] Health check passed in ${((Date.now() - start) / 1000).toFixed(1)}s`);
+            console.log(
+              `[cosyvoice] Health check passed in ${((Date.now() - start) / 1000).toFixed(1)}s`,
+            );
             return;
           }
         }
       } catch {
         // Connection refused or timeout -- pod not ready yet
       }
-      await new Promise(r => setTimeout(r, 3000));
+      await new Promise((r) => setTimeout(r, 3000));
     }
-    throw new Error(`CosyVoice health check timed out after ${(timeoutMs / 1000).toFixed(0)}s`);
+    throw new Error(
+      `CosyVoice health check timed out after ${(timeoutMs / 1000).toFixed(0)}s`,
+    );
   },
 
   /**
@@ -128,7 +134,9 @@ export const cosyvoice = {
     const baseUrl = getPodBaseUrl();
     const separateUrl = `${baseUrl}/separate`;
 
-    console.log(`[cosyvoice] Sending audio to Demucs /separate at ${separateUrl}...`);
+    console.log(
+      `[cosyvoice] Sending audio to Demucs /separate at ${separateUrl}...`,
+    );
 
     // Step 1: Upload file and start async task
     const audioBuffer = fs.readFileSync(audioPath);
@@ -144,7 +152,9 @@ export const cosyvoice = {
 
     if (!startRes.ok) {
       const errText = await startRes.text();
-      throw new Error(`Demucs /separate submit failed (${startRes.status}): ${errText}`);
+      throw new Error(
+        `Demucs /separate submit failed (${startRes.status}): ${errText}`,
+      );
     }
 
     const startData = await startRes.json();
@@ -154,7 +164,9 @@ export const cosyvoice = {
       throw new Error("Demucs /separate did not return a task_id");
     }
 
-    console.log(`[cosyvoice] Demucs task started: ${taskId}. Polling for result...`);
+    console.log(
+      `[cosyvoice] Demucs task started: ${taskId}. Polling for result...`,
+    );
 
     // Step 2: Poll for completion (lightweight status-only responses)
     const pollUrl = `${baseUrl}/separate/${taskId}`;
@@ -185,17 +197,25 @@ export const cosyvoice = {
         const bgRes = await fetch(`${baseUrl}/separate/${taskId}/background`, {
           signal: AbortSignal.timeout(60000),
         });
-        if (!bgRes.ok) throw new Error(`Failed to download background stem (${bgRes.status})`);
+        if (!bgRes.ok)
+          throw new Error(
+            `Failed to download background stem (${bgRes.status})`,
+          );
         const backgroundBuffer = Buffer.from(await bgRes.arrayBuffer());
 
         const vocalsRes = await fetch(`${baseUrl}/separate/${taskId}/vocals`, {
           signal: AbortSignal.timeout(60000),
         });
-        if (!vocalsRes.ok) throw new Error(`Failed to download vocals stem (${vocalsRes.status})`);
+        if (!vocalsRes.ok)
+          throw new Error(
+            `Failed to download vocals stem (${vocalsRes.status})`,
+          );
         const vocalsBuffer = Buffer.from(await vocalsRes.arrayBuffer());
 
         // Clean up server-side files
-        await fetch(`${baseUrl}/separate/${taskId}`, { method: "DELETE" }).catch(() => {});
+        await fetch(`${baseUrl}/separate/${taskId}`, {
+          method: "DELETE",
+        }).catch(() => {});
 
         console.log(
           `[cosyvoice] Demucs separation complete in ${((Date.now() - start) / 1000).toFixed(1)}s — background: ${(backgroundBuffer.length / 1024).toFixed(0)}KB, vocals: ${(vocalsBuffer.length / 1024).toFixed(0)}KB`,
@@ -209,7 +229,9 @@ export const cosyvoice = {
       }
 
       // Any other status is an error
-      throw new Error(`Demucs task failed: ${pollData.error ?? "Unknown error"}`);
+      throw new Error(
+        `Demucs task failed: ${pollData.error ?? "Unknown error"}`,
+      );
     }
 
     throw new Error(`Demucs separation timed out after ${pollTimeout / 1000}s`);
@@ -247,7 +269,14 @@ export const cosyvoice = {
     if (env.RUNPOD_POD_ID) {
       // Pod's FastAPI server handles all text formatting (endofprompt + language tag).
       // Send plain text + target_language separately.
-      return this.synthesizeViaPod(text, promptWavPath, mode, clampedSpeed, targetLanguage, promptText);
+      return this.synthesizeViaPod(
+        text,
+        promptWavPath,
+        mode,
+        clampedSpeed,
+        targetLanguage,
+        promptText,
+      );
     }
 
     if (!env.COSYVOICE_URL || !env.RUNPOD_API_KEY) {
@@ -258,7 +287,14 @@ export const cosyvoice = {
 
     // Serverless handler expects pre-formatted text with language tag
     const finalText = `<|${targetLanguage}|>${text}`;
-    return this.synthesizeViaServerless(finalText, promptWavPath, mode, clampedSpeed, targetLanguage, promptText);
+    return this.synthesizeViaServerless(
+      finalText,
+      promptWavPath,
+      mode,
+      clampedSpeed,
+      targetLanguage,
+      promptText,
+    );
   },
 
   /**
@@ -286,8 +322,11 @@ export const cosyvoice = {
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       if (attempt > 0) {
-        const delay = RETRY_BACKOFF_MS[Math.min(attempt - 1, RETRY_BACKOFF_MS.length - 1)];
-        console.log(`[cosyvoice] Retry ${attempt}/${MAX_RETRIES} after ${delay}ms...`);
+        const delay =
+          RETRY_BACKOFF_MS[Math.min(attempt - 1, RETRY_BACKOFF_MS.length - 1)];
+        console.log(
+          `[cosyvoice] Retry ${attempt}/${MAX_RETRIES} after ${delay}ms...`,
+        );
         await new Promise((r) => setTimeout(r, delay));
       }
 
@@ -328,22 +367,30 @@ export const cosyvoice = {
         return outputBuffer;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
-        console.warn(`[cosyvoice] TTS attempt ${attempt + 1} failed: ${lastError.message}`);
+        console.warn(
+          `[cosyvoice] TTS attempt ${attempt + 1} failed: ${lastError.message}`,
+        );
 
         if (hadPriorSuccess && isPodRestartError(lastError)) {
-          console.warn(`[cosyvoice] Pod restart detected — waiting for recovery...`);
+          console.warn(
+            `[cosyvoice] Pod restart detected — waiting for recovery...`,
+          );
           try {
             await this.waitForHealth(180000);
             attempt--;
             continue;
           } catch {
-            console.error(`[cosyvoice] Pod recovery failed — continuing retry loop`);
+            console.error(
+              `[cosyvoice] Pod recovery failed — continuing retry loop`,
+            );
           }
         }
       }
     }
 
-    throw lastError ?? new Error("CosyVoice TTS failed after retries (pod direct)");
+    throw (
+      lastError ?? new Error("CosyVoice TTS failed after retries (pod direct)")
+    );
   },
 
   /**
@@ -383,8 +430,11 @@ export const cosyvoice = {
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       if (attempt > 0) {
-        const delay = RETRY_BACKOFF_MS[Math.min(attempt - 1, RETRY_BACKOFF_MS.length - 1)];
-        console.log(`[cosyvoice] Retry ${attempt}/${MAX_RETRIES} after ${delay}ms...`);
+        const delay =
+          RETRY_BACKOFF_MS[Math.min(attempt - 1, RETRY_BACKOFF_MS.length - 1)];
+        console.log(
+          `[cosyvoice] Retry ${attempt}/${MAX_RETRIES} after ${delay}ms...`,
+        );
         await new Promise((r) => setTimeout(r, delay));
       }
 
@@ -400,23 +450,31 @@ export const cosyvoice = {
 
         if (!res.ok) {
           const errText = await res.text();
-          throw new Error(`RunPod inference failed (${res.status}): ${errText}`);
+          throw new Error(
+            `RunPod inference failed (${res.status}): ${errText}`,
+          );
         }
 
         const runpodResult = await res.json();
 
         if (runpodResult.status !== "COMPLETED") {
-          throw new Error(`RunPod returned unsuccessful status: ${runpodResult.status}`);
+          throw new Error(
+            `RunPod returned unsuccessful status: ${runpodResult.status}`,
+          );
         }
 
         const output = runpodResult.output;
         if (!output || output.error) {
-          throw new Error(`RunPod serverless error: ${output?.error ?? "Unknown execution error"}`);
+          throw new Error(
+            `RunPod serverless error: ${output?.error ?? "Unknown execution error"}`,
+          );
         }
 
         const audioBase64 = output.audio;
         if (!audioBase64) {
-          throw new Error("RunPod returned empty audio payload inside output object");
+          throw new Error(
+            "RunPod returned empty audio payload inside output object",
+          );
         }
 
         const outputBuffer = Buffer.from(audioBase64, "base64");
@@ -429,21 +487,139 @@ export const cosyvoice = {
         return outputBuffer;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
-        console.warn(`[cosyvoice] TTS attempt ${attempt + 1} failed: ${lastError.message}`);
+        console.warn(
+          `[cosyvoice] TTS attempt ${attempt + 1} failed: ${lastError.message}`,
+        );
 
         if (hadPriorSuccess && isPodRestartError(lastError)) {
-          console.warn(`[cosyvoice] Pod restart detected — waiting for recovery...`);
+          console.warn(
+            `[cosyvoice] Pod restart detected — waiting for recovery...`,
+          );
           try {
             await this.waitForHealth(180000);
             attempt--;
             continue;
           } catch {
-            console.error(`[cosyvoice] Pod recovery failed — continuing retry loop`);
+            console.error(
+              `[cosyvoice] Pod recovery failed — continuing retry loop`,
+            );
           }
         }
       }
     }
 
-    throw lastError ?? new Error("CosyVoice TTS failed after retries (serverless)");
+    throw (
+      lastError ?? new Error("CosyVoice TTS failed after retries (serverless)")
+    );
+  },
+
+  /**
+   * Synthesize speech using CosyVoice 3 instruct2 mode.
+   * This mode accepts a natural language instruction that controls voice style,
+   * emotion, and accent — ideal for short segments (reduces accent bleeding)
+   * and emotion-aware synthesis.
+   *
+   * Falls back to regular cross_lingual synthesis if instruct2 is unavailable.
+   */
+  async synthesizeInstruct2(
+    text: string,
+    instructText: string,
+    promptWavPath: string,
+    targetLanguage: string,
+    speed?: number,
+  ): Promise<Buffer> {
+    if (!text || text.trim().length === 0) {
+      throw new Error("Cannot synthesize empty text");
+    }
+
+    const clampedSpeed = 1.0;
+
+    if (!env.RUNPOD_POD_ID) {
+      // instruct2 is only supported via direct pod — fall back to regular synthesis for serverless
+      return this.synthesize(
+        text,
+        promptWavPath,
+        "en",
+        targetLanguage,
+        clampedSpeed,
+      );
+    }
+
+    const baseUrl = getPodBaseUrl();
+    const synthesizeUrl = `${baseUrl}/synthesize_instruct2`;
+
+    console.log(
+      `[cosyvoice] Synthesizing via instruct2 (target: ${targetLanguage}, instruct: "${instructText.slice(0, 60)}...")`,
+    );
+
+    const wavBuffer = fs.readFileSync(promptWavPath);
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        const delay =
+          RETRY_BACKOFF_MS[Math.min(attempt - 1, RETRY_BACKOFF_MS.length - 1)];
+        console.log(
+          `[cosyvoice] Retry ${attempt}/${MAX_RETRIES} after ${delay}ms...`,
+        );
+        await new Promise((r) => setTimeout(r, delay));
+      }
+
+      try {
+        const formData = new FormData();
+        formData.append("text", text);
+        formData.append("instruct_text", instructText);
+        formData.append("speed", String(clampedSpeed));
+        formData.append("target_language", targetLanguage);
+        formData.append(
+          "reference_audio",
+          new Blob([wavBuffer], { type: "audio/wav" }),
+          "reference.wav",
+        );
+
+        const res = await fetch(synthesizeUrl, {
+          method: "POST",
+          body: formData,
+          signal: AbortSignal.timeout(120000),
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(
+            `Pod /synthesize_instruct2 failed (${res.status}): ${errText}`,
+          );
+        }
+
+        const arrayBuffer = await res.arrayBuffer();
+        const outputBuffer = Buffer.from(arrayBuffer);
+
+        console.log(
+          `[cosyvoice] Synthesized via instruct2 (${outputBuffer.length} bytes WAV)`,
+        );
+
+        return outputBuffer;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        console.warn(
+          `[cosyvoice] instruct2 attempt ${attempt + 1} failed: ${lastError.message}`,
+        );
+
+        if (isPodRestartError(lastError)) {
+          try {
+            await this.waitForHealth(180000);
+            attempt--;
+            continue;
+          } catch {
+            console.error(
+              `[cosyvoice] Pod recovery failed — continuing retry loop`,
+            );
+          }
+        }
+      }
+    }
+
+    throw (
+      lastError ?? new Error("CosyVoice instruct2 TTS failed after retries")
+    );
   },
 };

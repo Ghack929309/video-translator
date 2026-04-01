@@ -116,6 +116,7 @@ export const TranslationScalarFieldEnum = {
   backgroundAudioKey: 'backgroundAudioKey',
   vocalsAudioKey: 'vocalsAudioKey',
   enableBackgroundMix: 'enableBackgroundMix',
+  backgroundVolume: 'backgroundVolume',
   loudnessProfile: 'loudnessProfile',
   failedSegments: 'failedSegments',
   failedSegmentCount: 'failedSegmentCount',
