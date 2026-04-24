@@ -21,6 +21,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Loader2 } from "lucide-react";
 import { requireAuth } from "~/services/middleware/auth";
 import { db } from "~/services/db.server";
+import { Prisma } from "prisma/prisma/client";
 import { tigris } from "~/services/tigris.server";
 import { enqueueTranslation } from "~/services/worker.server";
 import { usePolling } from "~/hooks/use-polling";
@@ -51,6 +52,36 @@ export async function action({ request, params }: Route.ActionArgs) {
     if (translation.status !== "FAILED") {
       throw new Response("Can only retry failed translations", { status: 400 });
     }
+    await enqueueTranslation(translation.id);
+    return data({ ok: true }, { headers });
+  }
+
+  if (intent === "reprocess") {
+    if (translation.status !== "COMPLETED" && translation.status !== "FAILED") {
+      throw new Response("Can only re-process completed or failed translations", { status: 400 });
+    }
+    await db.translation.update({
+      where: { id: translation.id },
+      data: {
+        status: "PENDING",
+        currentStep: null,
+        progress: 0,
+        errorMessage: null,
+        errorStep: null,
+        resultVideoKey: null,
+        synthesizedAudioKey: null,
+        extractedAudioKey: null,
+        backgroundAudioKey: null,
+        vocalsAudioKey: null,
+        transcriptJson: Prisma.DbNull,
+        translatedJson: Prisma.DbNull,
+        failedSegments: Prisma.DbNull,
+        failedSegmentCount: 0,
+        startedAt: null,
+        completedAt: null,
+        retryCount: { increment: 1 },
+      },
+    });
     await enqueueTranslation(translation.id);
     return data({ ok: true }, { headers });
   }
@@ -183,6 +214,9 @@ export default function TranslationDetailPage() {
   const isRetrying =
     navigation.state === "submitting" &&
     navigation.formData?.get("intent") === "retry";
+  const isReprocessing =
+    navigation.state === "submitting" &&
+    navigation.formData?.get("intent") === "reprocess";
 
   // Poll for live status updates while processing
   const isProcessing =
@@ -389,22 +423,50 @@ export default function TranslationDetailPage() {
         </Card>
       )}
 
-      {/* Completed — download button */}
+      {/* Completed — download + re-process */}
       {status === "COMPLETED" && translation.resultVideoUrl && (
-        <a
-          href={translation.resultVideoUrl}
-          download
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Button size="lg" className="w-full gap-2">
-            <Download className="h-4 w-4" />
-            Download Translated Video
-          </Button>
-        </a>
+        <div className="flex flex-col gap-3">
+          <a
+            href={translation.resultVideoUrl}
+            download
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Button size="lg" className="w-full gap-2">
+              <Download className="h-4 w-4" />
+              Download Translated Video
+            </Button>
+          </a>
+          <Form
+            method="post"
+            onSubmit={(e) => {
+              if (
+                !confirm("Re-process this translation from scratch? The current result will be replaced.")
+              ) {
+                e.preventDefault();
+              }
+            }}
+          >
+            <input type="hidden" name="intent" value="reprocess" />
+            <Button
+              type="submit"
+              size="lg"
+              variant="outline"
+              className="w-full gap-2"
+              disabled={isReprocessing}
+            >
+              {isReprocessing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RotateCcw className="h-4 w-4" />
+              )}
+              Re-process Translation
+            </Button>
+          </Form>
+        </div>
       )}
 
-      {/* Failed — retry / delete */}
+      {/* Failed — retry / re-process / delete */}
       {status === "FAILED" && (
         <Card className="border-destructive/30">
           <CardContent className="flex gap-3 p-6">
@@ -417,6 +479,31 @@ export default function TranslationDetailPage() {
                   <RotateCcw className="h-4 w-4" />
                 )}
                 Retry Translation
+              </Button>
+            </Form>
+            <Form
+              method="post"
+              onSubmit={(e) => {
+                if (
+                  !confirm("Re-process from scratch? All existing data will be cleared.")
+                ) {
+                  e.preventDefault();
+                }
+              }}
+            >
+              <input type="hidden" name="intent" value="reprocess" />
+              <Button
+                type="submit"
+                variant="outline"
+                className="gap-2"
+                disabled={isReprocessing}
+              >
+                {isReprocessing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RotateCcw className="h-4 w-4" />
+                )}
+                Re-process
               </Button>
             </Form>
             <Form

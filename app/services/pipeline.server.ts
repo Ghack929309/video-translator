@@ -178,33 +178,6 @@ function getCarrierPhrase(langCode: string): string {
   return CARRIER_PHRASES[langCode] ?? CARRIER_PHRASES.en;
 }
 
-/**
- * Phase 14: Language-specific instruct2 prompts for accent control.
- * These instructions tell CosyVoice to use the correct target language
- * phonology, reducing accent bleeding on short segments.
- */
-const LANGUAGE_INSTRUCT: Record<string, string> = {
-  en: "Speak naturally in English with clear pronunciation.",
-  fr: "Parlez naturellement en français avec une prononciation claire.",
-  es: "Habla de forma natural en español con una pronunciación clara.",
-  de: "Sprechen Sie natürlich auf Deutsch mit klarer Aussprache.",
-  it: "Parla in modo naturale in italiano con una pronuncia chiara.",
-  pt: "Fale naturalmente em português com uma pronúncia clara.",
-  ja: "自然な日本語で、はっきりとした発音で話してください。",
-  ko: "자연스러운 한국어로 명확하게 발음하며 말해 주세요.",
-  zh: "用自然的中文清晰地朗读。",
-  ru: "Говорите естественно по-русски с чётким произношением.",
-};
-
-function getLanguageInstruct(langCode: string, emotion?: string): string {
-  const base =
-    LANGUAGE_INSTRUCT[langCode] ?? "Speak naturally with clear pronunciation.";
-  if (emotion && emotion !== "neutral") {
-    return `${base} Use a ${emotion} tone.`;
-  }
-  return base;
-}
-
 interface TranslatedSegment {
   translatedText: string;
   start: number;
@@ -1269,88 +1242,46 @@ export const pipeline = {
             translation.targetLanguage,
           );
 
-          // Phase 14: Short segments use instruct2 mode for better accent control.
-          // Non-neutral emotions also use instruct2 for expressive synthesis.
-          // Falls back to carrier phrase padding (Phase 13) if instruct2 fails.
-          // instruct2 requires minimum ~8 chars — shorter text hits PyTorch conv kernel errors.
+          // Determine if this is a short segment needing carrier phrase padding
           const originalText = normalizedText;
           const isShortSegment =
             originalText.length < SHORT_SEGMENT_CHARS && isCosyVoice;
-          const segEmotion = seg.emotion ?? "neutral";
-          const hasEmotion = segEmotion !== "neutral" && isCosyVoice;
-          const MIN_INSTRUCT2_CHARS = 8;
-          const textLongEnoughForInstruct2 = originalText.length >= MIN_INSTRUCT2_CHARS;
-          const useInstruct2 =
-            (isShortSegment || hasEmotion) && env.RUNPOD_POD_ID && textLongEnoughForInstruct2;
-          let usedInstruct2 = false;
 
-          if (isCosyVoice && useInstruct2) {
-            // Phase 14: Try instruct2 for short segments or emotional segments
-            try {
-              const instructText = getLanguageInstruct(
-                translation.targetLanguage,
-                segEmotion,
-              );
-              audioBuffer = await cosyvoice.synthesizeInstruct2(
-                originalText,
-                instructText,
-                speakerRef,
-                translation.targetLanguage,
-                1.0,
-              );
-              usedInstruct2 = true;
-              console.log(
-                `[pipeline] Seg ${i}: used instruct2 mode (${isShortSegment ? "short text" : "emotion"}: ${segEmotion}, ${originalText.length} chars)`,
-              );
-            } catch (instruct2Err) {
-              const msg =
-                instruct2Err instanceof Error
-                  ? instruct2Err.message
-                  : "Unknown";
-              console.warn(
-                `[pipeline] Seg ${i}: instruct2 failed (${msg}) — falling back to carrier phrase`,
-              );
-              usedInstruct2 = false;
-            }
+          // Standard synthesis path (with carrier phrase padding for short CosyVoice segments)
+          const carrierPhrase = isShortSegment
+            ? getCarrierPhrase(translation.targetLanguage)
+            : "";
+          const ttsText = isShortSegment
+            ? originalText + carrierPhrase
+            : originalText;
+
+          if (isShortSegment) {
+            console.log(
+              `[pipeline] Seg ${i}: short text (${originalText.length} chars) — padded with carrier phrase for better voice quality`,
+            );
           }
 
-          if (!usedInstruct2) {
-            // Standard synthesis path (with carrier phrase padding for short CosyVoice segments)
-            const carrierPhrase = isShortSegment
-              ? getCarrierPhrase(translation.targetLanguage)
-              : "";
-            const ttsText = isShortSegment
-              ? originalText + carrierPhrase
-              : originalText;
-
-            if (isShortSegment) {
-              console.log(
-                `[pipeline] Seg ${i}: short text (${originalText.length} chars) — padded with carrier phrase for better voice quality`,
-              );
-            }
-
-            if (isCosyVoice) {
-              audioBuffer = await cosyvoice.synthesize(
-                ttsText,
-                speakerRef,
-                sourceLanguage,
-                translation.targetLanguage,
-                1.0, // Per D-15: always 1.0
-              );
-            } else {
-              audioBuffer = await fishAudio.synthesize(
-                normalizedText,
-                speakerRef,
-                translation.targetLanguage,
-                1.0, // Per D-15: always 1.0
-              );
-            }
+          if (isCosyVoice) {
+            audioBuffer = await cosyvoice.synthesize(
+              ttsText,
+              speakerRef,
+              sourceLanguage,
+              translation.targetLanguage,
+              1.0, // Per D-15: always 1.0
+            );
+          } else {
+            audioBuffer = await fishAudio.synthesize(
+              normalizedText,
+              speakerRef,
+              translation.targetLanguage,
+              1.0, // Per D-15: always 1.0
+            );
           }
           fs.writeFileSync(rawPath, audioBuffer!);
           let actualGeneratedSec = await ffmpeg.getDuration(rawPath);
 
           // Phase 13: Trim carrier phrase audio from the end if we used carrier phrase padding
-          if (isShortSegment && !usedInstruct2) {
+          if (isShortSegment) {
             const carrierPhrase = getCarrierPhrase(translation.targetLanguage);
             if (carrierPhrase.length > 0) {
               const ttsText = originalText + carrierPhrase;
